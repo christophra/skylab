@@ -88,11 +88,11 @@ class TimeBoxLLH(PowerLawLLH):
         self._bckg_spline = RectBivariateSpline( (binsa[1:] + binsa[:-1]) / 2.,(binsz[1:] + binsz[:-1]) / 2.,  np.log(hist))
 
     def background(self, ev):
-        self.background_vect(self, zip(ev["Azimuth"],ev["cozZenith"]))
+        return self.background_vect(self, ev["Azimuth"],ev["cozZenith"])
         
     @staticmethod
     @np.vectorize
-    def background_vect(self, azimuth,coszenith):
+    def background_vect(self, az,zen):
         r"""Spatial background distribution. local coordinates for time dep.
 
         For IceCube is only declination dependent, in a more general scenario,
@@ -109,32 +109,7 @@ class TimeBoxLLH(PowerLawLLH):
         P : array-like
 
         """
-        return 1. / 2. / np.pi * np.exp(self.bckg_spline(azimuth,coszenith))
+        return 1. / 2. / np.pi * np.exp(self.bckg_spline(az,zen))
 
-    def signal(self, src_ra, src_dec, ev):
-        r"""Spatial distance between source position and events
-
-        Signal is assumed to cluster around source position.
-        The distribution is assumed to be well approximated by a gaussian
-        locally.
-
-        Parameters
-        -----------
-        ev : structured array
-            Event array, import information: sinDec, ra, sigma
-
-        Returns
-        --------
-        P : array-like
-            Spatial signal probability for each event
-
-        """
-        cos_ev = np.sqrt(1. - ev["sinDec"]**2)
-        dist = np.arccos(np.cos(src_ra - ev["ra"])
-                            * np.cos(src_dec) * cos_ev
-                         + np.sin(src_dec) * ev["sinDec"])
-
-        return (1./2./np.pi/ev["sigma"]**2
-                * np.exp(-dist**2 / 2. / ev["sigma"]**2))
 
 
