@@ -2,6 +2,7 @@ import ps_model
 PowerLawLLH = ps_model.PowerLawLLH
 import numpy as np
 from scipy.stats import norm
+from scipy.interpolate import RectBivariateSpline
 
 class TimePDF(object):
     r""" time pdf, top level class, for given time returns value
@@ -63,3 +64,77 @@ class TimeBoxLLH(PowerLawLLH):
     
     def __init__(self, twodim_bins=ps_model._2dim_bins, twodim_range=None, **kwargs):
         super(TimeBoxLLH, self).__init__(["logE", "sinDec"], twodim_bins, range=twodim_range, **kwargs)
+        
+        r"""this part is similar to the time integrated, but the important difference is that it is in local coodinates
+        so that on short time scales the detector special directions are evaluated correctly
+        """
+        self.Azimuth_bins=90.
+        self.cosZenith_bins=12.
+        
+    def __call__(self, exp, mc):
+        hist, binsa, binsz=np.histogram2d(exp["Azimuth"],exp["cozZenith"], bins=[self.Azimuth_bins,self.cosZenith_bins], range=None, normed=True )
+
+        # overwrite range and bins to actual bin edges
+        self.Azimuth_bins = binsa
+        self.Azimuth_range = (binsa[0], binsa[-1])
+        self.cosZenith_bins= binsz
+        self.cosZenith_range = (binsz[0], binsz[-1])
+
+        if np.any(hist <= 0.):
+            estr = ("Local coord. hist bins empty, this must not happen! "
+                    +"Empty bins: {0}".format(bmids[hist <= 0.]))
+            raise ValueError(estr)
+
+        self._bckg_spline = RectBivariateSpline( (binsa[1:] + binsa[:-1]) / 2.,(binsz[1:] + binsz[:-1]) / 2.,  np.log(hist))
+
+    def background(self, ev):
+        self.background_vect(self, zip(ev["Azimuth"],ev["cozZenith"]))
+        
+    @staticmethod
+    @np.vectorize
+    def background_vect(self, azimuth,coszenith):
+        r"""Spatial background distribution. local coordinates for time dep.
+
+        For IceCube is only declination dependent, in a more general scenario,
+        it is dependent on zenith and
+        azimuth, e.g. in ANTARES, KM3NET, or using time dependent information.
+
+        Parameters
+        -----------
+        ev : structured array
+            Event array, importand information *sinDec* for this calculation
+
+        Returns
+        --------
+        P : array-like
+
+        """
+        return 1. / 2. / np.pi * np.exp(self.bckg_spline(azimuth,coszenith))
+
+    def signal(self, src_ra, src_dec, ev):
+        r"""Spatial distance between source position and events
+
+        Signal is assumed to cluster around source position.
+        The distribution is assumed to be well approximated by a gaussian
+        locally.
+
+        Parameters
+        -----------
+        ev : structured array
+            Event array, import information: sinDec, ra, sigma
+
+        Returns
+        --------
+        P : array-like
+            Spatial signal probability for each event
+
+        """
+        cos_ev = np.sqrt(1. - ev["sinDec"]**2)
+        dist = np.arccos(np.cos(src_ra - ev["ra"])
+                            * np.cos(src_dec) * cos_ev
+                         + np.sin(src_dec) * ev["sinDec"])
+
+        return (1./2./np.pi/ev["sigma"]**2
+                * np.exp(-dist**2 / 2. / ev["sigma"]**2))
+
+
