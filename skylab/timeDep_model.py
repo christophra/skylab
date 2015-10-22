@@ -1,8 +1,9 @@
 import ps_model
-PowerLawLLH = ps_model.PowerLawLLH
+WeightLLH = ps_model.WeightLLH
 import numpy as np
 from scipy.stats import norm
 from scipy.interpolate import RectBivariateSpline
+from copy import deepcopy
 
 class TimePDF(object):
     r""" time pdf, top level class, for given time returns value
@@ -11,6 +12,7 @@ class TimePDF(object):
     def __init__(self,tstart,tend):
         self.tstart=tstart
         self.tend=tend
+        self.changed=True
         
     def tPDFvals(self,ev_times):
         return self.tPDFval_vect(self,ev_times)
@@ -59,19 +61,27 @@ class TimePDFGauss(TimePDF):
         gfcn=norm(loc = self.mean, scale = self.sigma)
         return gfcn.pdf(ev_times)
         
-class TimeBoxLLH(PowerLawLLH):
+class TimeBoxLLH(WeightLLH):
     r""" Simplest time dep. search, a time PDF shaped as a box"""
     
-    def __init__(self, twodim_bins=ps_model._2dim_bins, twodim_range=None, **kwargs):
-        super(TimeBoxLLH, self).__init__(["logE", "sinDec"], twodim_bins, range=twodim_range, **kwargs)
+    def __init__(self, twodim_bins=ps_model._2dim_bins,timePDF=None, twodim_range=None, **kwargs):
         
+        self.timePDF=timePDF
+        params = dict(gamma=(kwargs.pop("seed", ps_model._gamma_params["gamma"][0]),
+                             deepcopy(kwargs.pop("bounds", deepcopy(ps_model._gamma_params["gamma"][1])))))
+
+        super(TimeBoxLLH, self).__init__(params, ["logE", "sinDec"],
+                                        twodim_bins, range=twodim_range,
+                                        normed=1, **kwargs)
+
         r"""this part is similar to the time integrated, but the important difference is that it is in local coodinates
         so that on short time scales the detector special directions are evaluated correctly
         """
-        self.Azimuth_bins=90.
-        self.cosZenith_bins=12.
+        self.Azimuth_bins=90
+        self.cosZenith_bins=12
         
     def __call__(self, exp, mc):
+        super(TimeBoxLLH, self).__call__(exp, mc)
         hist, binsa, binsz=np.histogram2d(exp["Azimuth"],exp["cozZenith"], bins=[self.Azimuth_bins,self.cosZenith_bins], range=None, normed=True )
 
         # overwrite range and bins to actual bin edges
@@ -86,9 +96,11 @@ class TimeBoxLLH(PowerLawLLH):
             raise ValueError(estr)
 
         self._bckg_spline = RectBivariateSpline( (binsa[1:] + binsa[:-1]) / 2.,(binsz[1:] + binsz[:-1]) / 2.,  np.log(hist))
-
+        
+    
     def background(self, ev):
-        return self.background_vect(self, ev["Azimuth"],ev["cozZenith"])
+        flatTimePDF=1./(self.timePDF.tend*self.timePDF.tstart)
+        return self.background_vect(self, ev["Azimuth"],ev["cozZenith"])*flatTimePDF
         
     @staticmethod
     @np.vectorize
@@ -109,7 +121,34 @@ class TimeBoxLLH(PowerLawLLH):
         P : array-like
 
         """
-        return 1. / 2. / np.pi * np.exp(self.bckg_spline(az,zen))
+        return np.exp(self.bckg_spline(az,zen))
 
+    def _get_weights(self, **params):
+        r"""Calculate weights using the given parameters.
 
+        Parameters
+        -----------
+        params : dict
+            Dictionary containing the parameter values for the weighting.
 
+        Returns
+        --------
+        weights : array-like
+            Weights for each event
+
+        """
+
+        return self._mc["ow"] * self._mc["trueE"]**(-params["gamma"])
+
+    def weight(self, ev, **params):
+        print params
+        val, grad_w=super(TimeBoxLLH, self).weight(ev, **params)
+        if self.timePDF.changed:
+            self.time_w=self.timePDF.tPDFvals(ev["mjd"])
+        
+        val=val*self.time_w
+        
+        return val, grad_w
+    
+    
+    
