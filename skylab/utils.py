@@ -24,9 +24,16 @@ Helper methods for the other classes
 
 """
 
+import logging
 import numpy as np
 from scipy.signal import convolve
 from scipy.stats import chi2, kstest, poisson
+from scipy.optimize import minimize
+
+# get module logger
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.StreamHandler())
+
 
 
 def kernel_func(X, Y):
@@ -312,7 +319,7 @@ class twoside_chi2(object):
             *data*      -   Data sample to use for fitting
 
         Keyword Argument:
-            *chi1/2*    -   Keyword arguments like floc, fshape, etc. that are
+            *chi1/2*    -   Keyword arguments like floc, fscale, etc. that are
                             passed to the constructor of the corresponding
                             chi2 scipy object.
 
@@ -467,4 +474,225 @@ def rotate(ra1, dec1, ra2, dec2, ra3, dec3):
     ra += np.where(ra < 0., 2. * np.pi, 0.)
 
     return ra, dec
+    
+def rotate_2d(angles_in, mjd):
+    r"""Rotate angles_in (right ascension / azimuth) according to the time mjd.
+    The result is (azimuth / right ascension) since the formula is symmetric.
+    This assumes the rotation can be approximated so that the axis is at Pole,
+    which neglects the exact position of IceCube and all astronomical effects."""
+    # constants
+    _sidereal_length = 0.997269566 # sidereal day = length * solar day
+    _sidereal_offset = 2.54199002505 # RA = offset + 2pi * (MJD/sidereal_length)%1  - azimuth
+    sidereal_day_residuals = ((mjd/_sidereal_length)%1)
+    angles_out = _sidereal_offset + 2 * np.pi * sidereal_day_residuals - angles_in
+    return angles_out
 
+
+class times(object):
+    r"""A class to make scrambled times which respect the detector uptime via a
+    "list of times" randomly drawn before, for a time range or density function."""
+    
+    _random = np.random.RandomState()
+    _seed = None
+    _prob = None
+    _sample_prob = None
+    _pdf = None
+    _mask = None
+    _tstart = None
+    _tend = None
+    
+    def __init__(self, listfile):
+        r"""Load list of times for file at path `listfile`."""
+        self._full_list = np.loadtxt(listfile) # original list
+        self._size = self._full_list.size # size of list
+        self._sample_list = np.copy(self._full_list) # used for sampling
+        self._mask =  np.full(self._size, True, dtype=bool)
+        self._tmin = self._full_list.min()
+        self._tmax = self._full_list.max()
+        
+    @property
+    def random(self):
+        return self._random
+
+    @random.setter
+    def random(self, value):
+        self._random = value
+        return
+
+    @property
+    def seed(self):
+        return self._seed
+
+    @seed.setter
+    def seed(self, val):
+        logger.info("Setting time scramble seed to {0:d}".format(int(val)))
+        self._seed = int(val)
+        self.random = np.random.RandomState(self.seed)
+        
+    def _update_mask(self):
+        r"""Updates mask after changing tstart, tend, prob or pdf."""
+        mask = np.full(self._size, True, dtype=bool)
+        if self._tstart is not None:
+            time_gt_tstart = (self._full_list >= self._tstart) 
+            mask *= time_gt_tstart        
+        if self._tend is not None:
+            time_lt_tend = (self._full_list <= self._tend)
+            mask *= time_lt_tend
+        if self._prob is not None:
+            prob_ne_zero = (self._prob != 0)
+            mask *= prob_ne_zero
+        self._mask = mask
+        self._sample_list = self._full_list[mask]
+        if self._prob is not None:
+            sample_prob = self._prob[mask]
+            sample_prob = sample_prob / sample_prob.sum()
+            self._sample_prob = sample_prob
+        else:
+            self._sample_prob = None
+        
+    @property
+    def tstart(self):
+        return self._tstart
+    @tstart.setter
+    def tstart(self, val):
+        self._tstart = max(val, self._tmin)
+        if self._tend is not None:
+            logger.info("Setting time range to [%d, %d]"%(int(self._tstart),int(self._tend)))
+        else:
+            logger.info("Setting start time to %d, "%int(self._tstart))
+        self._update_mask()
+        
+    @property
+    def tend(self):
+        return self._tend
+    @tend.setter
+    def tend(self, val):
+        self._tend = min(val, self._tmax)
+        if self._tstart is not None:
+            logger.info("Setting time range to [%d, %d]"%(int(self._tstart),int(self._tend)))
+        else:
+            logger.info("Setting end time to %d, "%int(self._tend))
+        self._update_mask()
+            
+    @property
+    def prob(self):
+        return self._prob
+    @prob.setter
+    def prob(self, val):
+        if val is not None:
+            self._prob = val / val.sum()
+        else:
+            self._prob = None
+        self._update_mask()
+
+    @property
+    def pdf(self):
+        return self._pdf
+    @pdf.setter
+    def pdf(self, val):
+        if val is not None:
+            self._pdf = val
+            self.prob = self._pdf(self._full_list) # normalizing, updating mask through prob.setter
+        else:
+            self.prob = None
+    
+    def sample(self,n):
+        r"""Generator to sample `n` times from the list, respecting tstart, tend, and pdf or prob."""
+        while True:
+            if self._sample_prob is not None:
+                yield self.random.choice(self._sample_list, size=n, p=self._sample_prob)
+                continue
+            else:
+                yield self.random.choice(self._sample_list, size=n)
+                continue
+                
+                
+def parabola_window(x):
+    r"""Constant + parabola window function with support [0,1], integral=1."""
+    return (1 - 0.5*(x - 0.5)**2) * 24./23.
+
+# Turned these functions into a class. Hopefully it saves time.
+# Maybe not, because I used NumPy so I don't have to convert the X that the minimizer uses...
+class _box(object):
+    def __init__(self, box, weight=1e4):
+        self.weight = weight
+        self.dim = len(box)
+        bounds = [] # stores bound values
+        sgn = [] # stores bound types by +/-1. None:0 proved to be tricky, implement later (!)
+        for lo,hi in box:
+            sgn_lo, sgn_hi=-1,1
+            #if lo is None:
+            #    sgn_lo=0
+            #    lo=0
+            #if hi is None:
+            #    sgn_hi=0
+            #    hi=0
+            sgn.append((sgn_lo,sgn_hi))
+            bounds.append((lo,hi))
+        self.bounds = np.asarray(bounds).T
+        self.sgn = np.asarray(sgn).T
+        
+        self.scale = np.ones(self.bounds.shape[1])
+        #not_free = np.invert(self.sgn[0,:]==0) * np.invert(self.sgn[1,:]==0)
+        #self.scale[not_free] = (self.bounds[0:,]+self.bounds[1:,])[not_free]
+        #self.scale = (self.bounds[0:,]+self.bounds[1:,])/10.
+        self.scale = 1.
+        
+    def boxfunc(self, x):
+        """Return box potential evaluated for x."""
+        flag = 1 - (self.sgn * x  <= self.sgn * self.bounds)
+        diff = (x - self.bounds)/self.scale
+        return (flag * self.weight * diff**2).sum()
+    def check_bounds(self, x):
+        """ print Xj in box, loj <= Xj <= hij
+            return boolean array
+        """
+        #nX = len(x)
+        #assert nX == self.dim, \
+        #    "len x %d != box dimension %d" % (nX, nbox)
+        notin = (self.sgn * x  <= self.sgn * self.bounds).sum(axis=0)>0
+        return notin    
+        
+def bounded_simplex(fun, x0, bounds, weight=1e4, args=(), **kwargs):
+    r"""Wrapper around scipy.optimize.minimize(method='Nelder-Mead')
+        adding parameter bounds with prior.
+        
+        Parameters
+        ----------
+        fun : callable
+            Objective function to minimize
+        x0 : ndarray
+            Initial guess
+        bounds : sequence
+            Bounds for variables.
+            (min, max) pairs for each element in x, defining the bounds on that parameter.
+             Leaving out bounds by using None is NOT supported right now.
+            
+        Returns
+        -------
+        xmin : ndarray
+            Minimizing function parameters
+        fmin : float
+            Objective function minimum
+        res : scipy.optimize.OptimizeResult
+            Further information about the minimization
+        
+            
+        Optional Parameters
+        --------------------
+        weight : float
+            Steepness parameter for the parameter bounds prior
+        args : tuple, optional
+            Extra arguments passed to the objective function
+            
+        """
+    bounds_box = _box(bounds, weight)
+    def fun_bounded(x):
+        return fun(x) + bounds_box.boxfunc(x)
+    res = minimize(fun_bounded, x0, args, method='Nelder-Mead', **kwargs)
+    xmin = res.x
+    fmin = res.fun
+    #print("check_bounds",bounds_box.check_bounds(xmin))
+    return xmin, fmin, res
+
+                
