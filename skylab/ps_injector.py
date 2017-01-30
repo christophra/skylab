@@ -36,6 +36,7 @@ PointSourceLikelihood - Class requires the methods
 
 # python packages
 import logging
+from copy import deepcopy
 
 # scipy-project imports
 import numpy as np
@@ -45,7 +46,8 @@ import scipy.interpolate
 
 # local package imports
 from . import set_pars
-from .utils import rotate
+from .utils import rotate, times, rotate_2d
+from .timeDep_model import TimePDFBinned
 
 # get module logger
 def trace(self, message, *args, **kwargs):
@@ -100,7 +102,42 @@ def rotate_struct(ev, ra, dec):
 
     return drop_fields(rot, mc)
 
+def rotate_struct(ev, ra, dec):
+    r"""Wrapper around the rotate-method in skylab.utils for structured
+    arrays.
 
+    Parameters
+    ----------
+    ev : structured array
+        Event information with ra, sinDec, plus true information
+
+    ra, dec : float
+        Coordinates to rotate the true direction onto
+
+    Returns
+    --------
+    ev : structured array
+        Array with rotated value, true information is deleted
+
+    """
+    names = ev.dtype.names
+
+    rot = np.copy(ev)
+
+    # Function call
+    rot["ra"], rot_dec = rotate(ev["trueRa"], ev["trueDec"],
+                                ra * np.ones(len(ev)), dec * np.ones(len(ev)),
+                                ev["ra"], np.arcsin(ev["sinDec"]))
+
+    if "dec" in names:
+        rot["dec"] = rot_dec
+    rot["sinDec"] = np.sin(rot_dec)
+
+    # "delete" Monte Carlo information from sampled events
+    mc = ["trueRa", "trueDec", "trueE", "ow"]
+
+    return drop_fields(rot, mc)
+    
 class Injector(object):
     r"""Base class for Signal Injectors defining the essential classes needed
     for the LLH evaluation.
@@ -566,21 +603,21 @@ class ModelInjector(PointSourceInjector):
 
         """
 
-        trueLogGeV = np.log10(self.mc["trueE"]) - np.log10(self.GeV)
+        trueLogGeV = np.log10(self.mc_arr["trueE"]) - np.log10(self.GeV)
 
         logF = self._spline(trueLogGeV)
         flux = np.power(10., logF - 2. * trueLogGeV) / self.GeV
 
         # remove NaN's, etc.
         m = (flux > 0.) & np.isfinite(flux)
-        self.mc = self.mc[m]
+        self.mc_arr = self.mc_arr[m]
 
         # assign flux to OneWeight
-        self.mc["ow"] *= flux[m] / self._omega
+        self.mc_arr["ow"] *= flux[m] / self._omega
 
-        self._raw_flux = np.sum(self.mc["ow"], dtype=np.float)
+        self._raw_flux = np.sum(self.mc_arr["ow"], dtype=np.float)
 
-        self._norm_w = self.mc["ow"] / self._raw_flux
+        self._norm_w = self.mc_arr["ow"] / self._raw_flux
 
         return
 
@@ -598,4 +635,159 @@ class ModelInjector(PointSourceInjector):
 
         return float(mu) / self._raw_flux
 
+class FlareInjector(PointSourceInjector):
+    r"""Injector that injects events proportional to a lightcurve.
+    """
+    
+    
+    def __init__(self, gamma, blocks, fluxes, threshold, timegen, *args, **kwargs):
+        r"""Constructor, setting up the weighting function.
 
+        Parameters
+        -----------
+        gamma : float
+            Spectral index in spectrum E^(-gamma).
+        blocks : array
+            Edges of lightcurve blocks in MJD.
+        fluxes : array
+            Lightcurve flux in units 1 / cm^2 s.
+        threshold : float
+            Lightcurve threshold applied to make PDF in units 1 / cm^2 s.
+        timegen : utils.times, dict of utils.times
+            Time scrambler based on list of times loaded from disk.
+
+        Other Parameters
+        -----------------
+        args, kwargs
+            Passed to PointSourceInjector
+
+        """
+
+        
+        # Store spectral index
+        self.gamma = gamma
+
+        # Store the lightcurve as a model
+        self.lightcurve_pdf = TimePDFBinned(blocks[0],blocks[-1],
+                                                          zip(blocks, np.append(fluxes,0)),
+                                                          threshold=threshold)
+                                                          
+        # FlareInjector modifies the sampling probabilities of its time
+        # generators, but they are mutable - so we need to deepcopy so that we
+        # don't change this timegen in other places where it is used, such as
+        #  other FlareInjectors.
+        timegen = deepcopy(timegen)
+        if not isinstance(timegen, dict):
+            timegen = {-1: timegen}
+
+        # set the lightcurve as sampling probability (and time range) for times
+        for key, gen_i in timegen.iteritems():
+            gen_i.tstart = self.lightcurve_pdf.TBS[0][0]
+            gen_i.tend = self.lightcurve_pdf.TBS[-1][0]
+            gen_i.pdf = self.lightcurve_pdf.tPDFvals
+            timegen[key] = gen_i
+        self.timegen = timegen
+                                                          
+        # Set all other attributes passed to the class
+        set_pars(self, **kwargs)
+
+        return
+        
+    def _weights(self):
+        r"""Setup weights for given models.
+
+        """
+        # weights given in days, weighted to the point source flux
+        # self.mc_arr["ow"] is multiplied by lifetime in fill(...)
+        # include (time pdf x detector up)>0 into livetime (!)
+        # (current solution: only detector uptime)
+        self.mc_arr["ow"] *= self.mc_arr["trueE"]**(-self.gamma) / self._omega
+        
+
+        self._raw_flux = np.sum(self.mc_arr["ow"], dtype=np.float)
+
+        # normalized weights for probability
+        self._norm_w = self.mc_arr["ow"] / self._raw_flux
+
+        # double-check if no weight is dominating the sample
+        if self._norm_w.max() > 0.1:
+            logger.warn("Warning: Maximal weight exceeds 10%: {0:7.2%}".format(
+                            self._norm_w.max()))
+
+        return
+
+    def fill(self, src_dec, mc, livetime):
+        r"""Fill the Injector with MonteCarlo events selecting events around
+        the source position(s), and store the (dictionary of) time generator(s).
+
+        Parameters
+        -----------
+        src_dec : float, array-like
+            Source location(s)
+        mc : recarray, dict of recarrays with sample enum as key (MultiPointSourceLLH)
+            Monte Carlo events
+        livetime : float, dict of floats
+            Livetime per sample
+             
+        """
+        # most tasks are same as with the default PointSourceInjector
+        super(FlareInjector, self).fill(src_dec, mc, livetime) # this breaks with IPython autoreload
+        #self.fill(src_dec, mc, livetime)
+        
+        # Check whether we can generate times for all the mc samples that are given
+        # If there is only one of each, they are both {-1 : value} and this cannot be verified!
+        if not set(self.mc.keys()) <= set(self.timegen.keys()):
+            raise ValueError("There are mc samples without matching timegen. "
+                            "mc keys: %s, "
+                            "timegen keys: %s."%(str(self.mc.keys()),str(self.timegen.keys())))
+ 
+        
+    def sample(self, mean_mu, poisson=True):
+        r""" Generator to get sampled events for a flaring point source.
+
+        Parameters
+        -----------
+        mean_mu : float
+            Mean number of events to sample
+
+        Returns
+        --------
+        num : int
+            Number of events
+        sam_ev : iterator
+            sampled_events for each loop iteration, either as simple array or
+            as dictionary for each sample
+
+        Optional Parameters
+        --------------------
+        poisson : bool
+            Use poisson fluctuations, otherwise sample exactly *mean_mu*
+
+        """
+        # generate event numbers using poissonian events
+        while True:
+            # The basic rotation should be the same as for any other point source
+            num, sam_ev = super(FlareInjector, self).sample(mean_mu, poisson).next() # this breaks with IPython autoreload
+            
+            if num<1:
+                yield num, sam_ev
+                continue
+            # only one sample, add times for that one and return recarray
+            if not isinstance(sam_ev, dict):
+                # draw times
+                enums = self.timegen.keys() # is this safe (?) no it's not (!)
+                sam_times = self.timegen[enums[0]].sample(num).next()
+                # store time in sample
+                sam_ev["time"] = sam_times
+                yield num, sam_ev
+                continue
+            
+            # else: we have several samples
+            for enum in enums:
+                sam_ev_i = sam_ev[enum]
+                sam_times_i = self.timegen[enum].sample(num)
+                # store times in sam_ev_i, they already have the field
+                sam_ev_i["time"] = sam_times_i
+                sam_ev_i["Azimuth"] = rotate_2d(sam_ev_i["ra"], sam_times_i) # THIS NEEDS TO CHANGE TO PRESERVE CORRELATION (!)
+                sam_ev[enum] = sam_ev_i
+            yield num, sam_ev

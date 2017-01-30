@@ -1,6 +1,7 @@
 # -*-coding:utf8-*-
 
-from __future__ import print_function
+from __future__ import print_function # print(a) instead of print a
+from __future__ import division # convert to float before dividing
 
 r"""This file is part of SkyLab
 
@@ -99,6 +100,8 @@ _ub_perc = 1.
 _win_points = 50
 
 
+
+
 class PointSourceLLH(object):
     r"""Basic Point Source Likelihood class
 
@@ -185,7 +188,7 @@ class PointSourceLLH(object):
     _nside = _nside
     _random = np.random.RandomState()
     _seed = _seed
-
+    
     # Data sample
     _livetime = _livetime
 
@@ -204,7 +207,9 @@ class PointSourceLLH(object):
     _src_dec = _src_dec
 
     def __init__(self, exp, mc, livetime,
-                 scramble=True, upscale=False, **kwargs):
+                 scramble=True, upscale=False,
+                 timescramble=False, timegen=None,
+                 **kwargs):
         r"""Constructor of `PointSourceLikelihood`.
 
         Fill the class with data and all necessary configuration.
@@ -225,6 +230,11 @@ class PointSourceLLH(object):
         ----------------
         scramble : bool
             Scramble data rightaway.
+        timescramble: bool
+            Scramble by choosing random times, re-computing RA from azimuth.
+            This option defines the behaviour of the instance everywhere.
+        timegen: utils.times or dict of utils.times
+            Object to sample random times or several for different datasets in a dict.
         upscale : bool or float
             If float, scale data to match livetime *upscale*
 
@@ -232,11 +242,25 @@ class PointSourceLLH(object):
             Configuration parameters to assign values to class attributes.
 
         """
-
+        #import inspect
+        #def lineno():
+        #    """Returns the current line number in our program."""
+        #    return inspect.currentframe().f_back.f_lineno
+        ##print(lineno())
         if upscale and not scramble:
             raise ValueError("Cannot upscale UNBLINDED data, "
                              "turn on scrambling!")
-
+        
+        ##print(lineno())                     
+        # TIME SCRAMBLING
+        if timescramble and (timegen is None):
+            raise ValueError("Cannot scramble in time without a generator, "
+                             "specify parameter timegen!")
+            timescramble = False
+        self.timescramble = timescramble
+        self.timegen = timegen
+        
+        ##print(lineno())
         # UPSCALING
         if upscale:
             print("Upscale exp. data distribution!")
@@ -282,36 +306,52 @@ class PointSourceLLH(object):
             livetime = up_livetime
 
             exp = RS.choice(exp, size=mu)
-
+        
+        #print(lineno())
         # store exp data, add sinDec information if not available
         self.exp = exp
-
         if not "sinDec" in self.exp.dtype.fields:
             self.exp = numpy.lib.recfunctions.append_fields(
                     self.exp, "sinDec", np.sin(self.exp["dec"]),
                     dtypes=np.float, usemask=False)
+                    
         if not "sinDec" in mc.dtype.fields:
             mc = numpy.lib.recfunctions.append_fields(
                     mc, "sinDec", np.sin(mc["dec"]),
                     dtypes=np.float, usemask=False)
-
+        if not "trueSinDec" in mc.dtype.fields:
+            mc = numpy.lib.recfunctions.append_fields(
+                    mc, "trueSinDec", np.sin(mc["trueDec"]),
+                    dtypes=np.float, usemask=False)
+                    
+        #print(lineno())
         # Experimental data values
         self.livetime = livetime
 
+        #print(lineno())
         # set llh model
         self.llh_model = kwargs.pop("llh_model", ps_model.ClassicLLH()), mc
-
+        # Now we can also cache self._current_par_scaling
+        self._current_par_scaling = self.par_scaling
+        
+        #print(lineno())
         # set all other parameters
         set_pars(self, **kwargs)
 
+        #print(lineno())
         # scramble data if not unblinded. Do this after seed has been set
         if scramble:
-            self.exp["ra"] = self.random.uniform(0., 2. * np.pi, len(self.exp))
+            if not self.timescramble:
+                self.exp["ra"] = self.random.uniform(0., 2. * np.pi, len(self.exp))
+            else:
+                random_times = self.timegen.sample(len(self.exp)).next()
+                self.exp["ra"] = utils.rotate_2d(self.exp["Azimuth"], random_times)
         else:
             print("\t####################################\n"
                   "\t# Working on >> UNBLINDED << data! #\n"
                   "\t####################################\n")
-
+                  
+        #print(lineno())
         # background probability will not change, calculate now
         self.exp = numpy.lib.recfunctions.append_fields(
             self.exp, "B", self.llh_model.background(self.exp),
@@ -376,7 +416,7 @@ class PointSourceLLH(object):
         Other parameters
         ----------------
         scramble : bool
-            Scramble rightascension prior to selection.
+            Scramble right ascension prior to selection.
         inject : numpy_structured_array
             Events to add to the selected events, fields equal to exp. data.
 
@@ -417,8 +457,12 @@ class PointSourceLLH(object):
 
         # update rightascension information for scrambled events
         if scramble:
-            self._ev["ra"] = self.random.uniform(0., 2. * np.pi,
-                                                 size=len(self._ev))
+            if not self.timescramble:
+                self._ev["ra"] = self.random.uniform(0., 2. * np.pi,
+                                                     size=len(self._ev))
+            else:
+                random_times = self.timegen.sample(len(self._ev)).next()
+                self._ev["ra"] = utils.rotate_2d(self._ev["Azimuth"], random_times)
 
         # selection in rightascension
         if self.mode == "box":
@@ -442,7 +486,6 @@ class PointSourceLLH(object):
                                     inject, "B",
                                     self.llh_model.background(inject),
                                     usemask=False))
-
             self._N += len(inject)
 
         # calculate signal term
@@ -569,6 +612,11 @@ class PointSourceLLH(object):
                                 if self._n > 0. else self.nsource)]
                         + [self.llh_model.params[par][0]
                            for par in self.params[1:]])
+                           
+    @property
+    def par_scaling(self):
+        return np.array([1e7 if par=='thres' else 1.
+                         for par in self.params])
 
     @property
     def mode(self):
@@ -897,10 +945,11 @@ class PointSourceLLH(object):
 
                 mask &= (dmask|tmask)
 
-            print("Scanning area of ~{0:4.2f}pi sr ({1:7.2%})".format(
+            print("Scanning area of ~{0:4.2f}pi sr ({1:7.2%}, {2:d} pix)".format(
                         np.sum(mask, dtype=np.float)
                             * hp.pixelfunc.nside2pixarea(nside) / np.pi,
-                        np.sum(mask, dtype=np.float) / len(mask)))
+                        np.sum(mask, dtype=np.float) / len(mask),
+                        np.sum(mask)))
 
             start = time.time()
 
@@ -963,7 +1012,7 @@ class PointSourceLLH(object):
 
         Other parameters
         ----------------
-        mu_gen : iterator
+        mu : iterator
             Iterator yielding injected events. Stored at ps_injector.
         n_iter : int
             Number of iterations to perform.
@@ -1046,14 +1095,26 @@ class PointSourceLLH(object):
 
         SoB = self._ev_S / self._ev["B"]
 
-        w, grad_w = self.llh_model.weight(self._ev, **fit_pars)
+        w, grad_w = self.llh_model.weight(self._ev, **fit_pars)        
 
         x = (SoB * w - 1.) / N
 
         # check which sums of the likelihood are close to the divergence
         aval = -1. + _aval
         alpha = nsources * x
-
+        
+        """
+        #------------------------ logLambda==-inf diagnostics ------------------
+        print("nsources", nsources)
+        print("N", N)
+        print("sum, any(isinf()) ...")
+        print("w: ",w.sum(), np.any(np.isinf(w)))
+        print("grad_w", grad_w.sum(), np.any(np.isinf(grad_w)))
+        print("SoB", SoB.sum(), np.any(np.isinf(SoB)))
+        print("x", x.sum(), np.any(np.isinf(x)))
+        #------------------------ logLambda==-inf diagnostics ------------------
+        """
+        
         # select events close to divergence
         xmask = alpha > aval
 
@@ -1064,7 +1125,7 @@ class PointSourceLLH(object):
                       + 1. / (1.+aval) * (alpha[~xmask] - aval)
                       - 1./2./(1.+aval)**2 * (alpha[~xmask]-aval)**2)
         funval = funval.sum() + (N - n) * np.log1p(-nsources / N)
-
+        
         # gradients
 
         # in likelihood function
@@ -1124,22 +1185,30 @@ class PointSourceLLH(object):
             Parameters passed to the L-BFGS-B minimiser.
 
         """
-
+        
         # wrap llh function to work with arrays
-        def _llh(x, *args):
+        def _llh_nograd(x, *args):
             """Scale likelihood variables so that they are both normalized.
             Returns -logLambda which is the test statistic and should
             be distributed with a chi2 distribution assuming the null
             hypothesis is true.
 
             """
+            
+            # undo scaling to x = ['nsources', 'thres', 'gamma']
+            # which is e.g. [1., 1e7, 1.]
+            # this is hacky, but the minimizer wants it that way (!)
+            x = x / self._current_par_scaling
 
             fit_pars = dict([(par, xi) for par, xi in zip(self.params, x)])
-
             fun, grad = self.llh(**fit_pars)
+            
+            # the "scaling" coordinate transform has to be appplied onto gradients
+            # before they are returned
+            grad = grad / self._current_par_scaling
 
             # return negative value needed for minimization
-            return -fun, -grad
+            return -fun#, -grad
 
         scramble = kwargs.pop("scramble", False)
         inject = kwargs.pop("inject", None)
@@ -1148,18 +1217,40 @@ class PointSourceLLH(object):
         # Set all weights once for this src location, if not already cached
         self._select_events(src_ra, src_dec, inject=inject, scramble=scramble)
 
-        # get seeds
+        # get seeds - from kwargs to fit_source or (default) self.par_seeds
         pars = self.par_seeds
         inds = [i for i, par in enumerate(self.params) if par in kwargs]
         pars[inds] = np.array([kwargs.pop(par) for par in self.params
                                                if par in kwargs])
-
+        # apply scaling to seeds and bounds
+        pars = pars * self._current_par_scaling
+        bounds = self.par_bounds * np.atleast_2d(self._current_par_scaling).T
+        
+        """
         # minimizer setup
         xmin, fmin, min_dict = scipy.optimize.fmin_l_bfgs_b(
                                 _llh, pars,
-                                bounds=self.par_bounds,
+                                #bounds=self.par_bounds,
+                                bounds=bounds,
                                 **kwargs)
+        """
+        # Try using Nelder-Mead/Simplex with hobo bounds
+        xmin, fmin, min_dict = utils.bounded_simplex(_llh_nograd, pars, bounds=bounds)
+        #------- minimizer diagnostics -----------------------------------------
+        #print("~~ Minimizer diagnostics ~~")
+        #print(min_dict)
+        #print("self.params ",self.params)
+        #print("xmin ",xmin)
+        #------- minimizer diagnostics -----------------------------------------
+        
+        # undo the evil scaling we applied before!
+        xmin = xmin / self._current_par_scaling
 
+        #------- minimizer diagnostics -----------------------------------------
+        #print(xmin)
+        #------- minimizer diagnostics -----------------------------------------
+         
+        # why do we set fmin=0, nfit=0 IF the bounds include nsources=0 (?)
         if fmin > 0 and (self.par_bounds[0][0] <= 0
                          and self.par_bounds[0][1] >= 0):
             # null hypothesis is part of minimisation, fit should be negative
@@ -1183,6 +1274,136 @@ class PointSourceLLH(object):
         fmin *= -np.sign(xmin["nsources"])
 
         return fmin, xmin
+    def scan_ts(self, src_ra, src_dec, scan_nsources, scan_gamma, **kwargs):
+        """Scan test statistic.
+
+        Parameters
+        ----------
+        src_ra src_dec : array_like
+            Source position(s).
+
+        Returns
+        -------
+        ts_matrix : array-like
+            Test statistic values computed on grid.
+
+        Other parameters
+        ----------------
+        scramble : bool
+            Scramble events prior to selection.
+
+        inject
+            Events to inject into the sample, same fields as experimental data.
+
+        kwargs
+            Parameters passed to the L-BFGS-B minimiser.
+
+        """
+
+        # wrap llh function to work with arrays
+        def _llh(x, *args):
+            """Scale likelihood variables so that they are both normalized.
+            Returns -logLambda which is the test statistic and should
+            be distributed with a chi2 distribution assuming the null
+            hypothesis is true.
+
+            """
+
+            fit_pars = dict([(par, xi) for par, xi in zip(self.params, x)])
+            fun, grad = self.llh(**fit_pars)
+
+            # return negative value needed for minimization
+            return -fun, -grad
+
+        scramble = kwargs.pop("scramble", False)
+        inject = kwargs.pop("inject", None)
+        kwargs.setdefault("pgtol", _pgtol)
+
+        # Set all weights once for this src location, if not already cached
+        self._select_events(src_ra, src_dec, inject=inject, scramble=scramble)
+
+        # get seeds
+        pars = self.par_seeds
+        inds = [i for i, par in enumerate(self.params) if par in kwargs]
+        pars[inds] = np.array([kwargs.pop(par) for par in self.params
+                                               if par in kwargs])
+
+        # result grid
+        ts_matrix = np.zeros(shape=(len(scan_nsources),len(scan_gamma)))
+        for i_ns,ns in enumerate(scan_nsources):
+            for i_g, g in enumerate(scan_gamma):
+                ts_ns_g = self.llh(nsources=ns, gamma = g)[0]
+                ts_matrix[i_ns,i_g] = ts_ns_g
+        return ts_matrix
+
+    def profile_ts(self, src_ra, src_dec, scan_nsources, scan_thres, scan_gamma, **kwargs):
+        """Scan test statistic in two parameters, maximize in the third.
+
+        Parameters
+        ----------
+        src_ra src_dec : array_like
+            Source position(s).
+
+        Returns
+        -------
+        fmin: array-like
+            Test statistic on grid, profiled along third axis.
+        xmin: array-like
+            Third parameter that maximizes TS for each grid point.
+        
+        
+        Other parameters
+        ----------------
+        scramble : bool
+            Scramble events prior to selection.
+
+        inject
+            Events to inject into the sample, same fields as experimental data.
+
+        kwargs
+            Parameters passed to the L-BFGS-B minimiser.
+
+        """
+
+        # wrap llh function to work with arrays
+        def _llh(x, *args):
+            """Scale likelihood variables so that they are both normalized.
+            Returns -logLambda which is the test statistic and should
+            be distributed with a chi2 distribution assuming the null
+            hypothesis is true.
+
+            """
+
+            fit_pars = dict([(par, xi) for par, xi in zip(self.params, x)])
+            fun, grad = self.llh(**fit_pars)
+
+            # return negative value needed for minimization
+            return -fun, -grad
+
+        scramble = kwargs.pop("scramble", False)
+        inject = kwargs.pop("inject", None)
+        kwargs.setdefault("pgtol", _pgtol)
+
+        # Set all weights once for this src location, if not already cached
+        self._select_events(src_ra, src_dec, inject=inject, scramble=scramble)
+
+        # get seeds
+        pars = self.par_seeds
+        inds = [i for i, par in enumerate(self.params) if par in kwargs]
+        pars[inds] = np.array([kwargs.pop(par) for par in self.params
+                                               if par in kwargs])
+
+        # result grid
+        ts_matrix = np.zeros(shape=(len(scan_nsources),len(scan_thres),len(scan_gamma)))
+        for i_ns,ns in enumerate(scan_nsources):
+            for i_th, th in enumerate(scan_thres):
+                for i_g, g in enumerate(scan_gamma):
+                    ts_ns_th_g = self.llh(nsources=ns, gamma = g, thres=th)[0]
+                    ts_matrix[i_ns,i_th,i_g] = ts_ns_th_g
+        profile_matrix = ts_matrix.max(axis=2)
+        profile_gamma = scan_gamma[np.argmax(ts_matrix,axis=2)]
+        del ts_matrix
+        return profile_matrix, profile_gamma
 
     def fit_source_loc(self, src_ra, src_dec, size, seed, **kwargs):
         """Minimize the negative log-Likelihood around interesting position.
@@ -1423,6 +1644,10 @@ class PointSourceLLH(object):
                 bounds = np.percentile(trials["n_inj"][trials["n_inj"] > 0],
                                        [_ub_perc, 100. - _ub_perc])
 
+                if bounds[0] == 1:
+                    bounds[0] = (float(np.count_nonzero(trials["n_inj"] == 1))
+                                    / np.sum(trials["n_inj"] < 2))
+
                 print("\tEstimate sens. in region {0:5.1f} to {1:5.1f}".format(
                             *bounds))
 
@@ -1536,7 +1761,9 @@ class PointSourceLLH(object):
                     else:
                         print("Fit delta chi2 to background scrambles")
                         fitfun = utils.delta_chi2
-                    fit = fitfun(trials["TS"][trials["n_inj"] == 0], df=2.,
+                    fit = fitfun(trials["TS"][trials["n_inj"] == 0],
+                                 # following kwargs are passed to scipy.stats.chi2.fit
+                                 # df=2., #  doesn't work (!) because it's passed as a kwarg, not second arg
                                  floc=0., fscale=1.)
 
                     # give information about the fit
@@ -1747,8 +1974,6 @@ class MultiPointSourceLLH(PointSourceLLH):
         # init empty dictionary containers
         self._enum = dict()
         self._sams = dict()
-        self._nuhist = dict()
-        self._nuspline = dict()
 
         return
 
@@ -1937,7 +2162,11 @@ class MultiPointSourceLLH(PointSourceLLH):
         if not isinstance(obj, PointSourceLLH):
             raise ValueError("'{0}' is not LLH-style".format(obj))
 
-        enum = max(self._enum) + 1 if self._enum else 0
+        if name in self._enum.values():
+            enum = self._enum.keys()[self._enum.values().index(name)]
+            print("Overwrite Sample {0:2d} - {1:s}".format(enum, name))
+        else:
+            enum = max(self._enum) + 1 if self._enum else 0
 
         self._enum[enum] = name
         self._sams[enum] = obj
@@ -1964,6 +2193,7 @@ class MultiPointSourceLLH(PointSourceLLH):
             Gradient at the point *fit_pars*.
 
         """
+
 
         src_dec = self._src_dec
         nsources = fit_pars.pop("nsources")

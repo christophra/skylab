@@ -234,6 +234,9 @@ class ClassicLLH(NullModel):
         h, bins = np.histogram(np.sin(mc["trueDec"]), weights=w,
                                bins=self.sinDec_bins, density=True)
 
+        # normalize by solid angle
+        h /= np.diff(self.sinDec_bins)
+
         # multiply histogram by event sum for event densitiy
         h *= w.sum()
 
@@ -307,7 +310,7 @@ class ClassicLLH(NullModel):
                 or np.sin(dec) > self.sinDec_bins[-1]):
             return 0., None
 
-        return self._spl_effA(dec), None
+        return self._spl_effA(np.sin(dec)), None
 
     def reset(self):
         r"""Classic likelihood does only depend on spatial part, needs no
@@ -349,6 +352,18 @@ class ClassicLLH(NullModel):
         return np.ones(len(ev)), None
 
 
+class UniformLLH(ClassicLLH):
+    r"""Spatial LLH class that assumes uniform distribution.
+
+    """
+
+    def __call__(self, *args, **kwargs):
+        return
+
+    def background(self, ev):
+        return np.full(len(ev), 1. / 4. / np.pi)
+
+
 class WeightLLH(ClassicLLH):
     r"""Likelihood class supporting weights for the calculation.
 
@@ -362,6 +377,8 @@ class WeightLLH(ClassicLLH):
     _precision = _precision
 
     _g1 = _par_val
+    _g1_set_lower_counter = 0 # counts how often gamma had to be extrapolated upwards
+    _g1_set_higher_counter = 0 # counts how often gamma had to be extrapolated downwards
     _w_cache = _parab_cache
 
     def __init__(self, params, pars, bins, *args, **kwargs):
@@ -392,7 +409,7 @@ class WeightLLH(ClassicLLH):
 
         """
 
-        params = params
+        params = params # this doesn't do anything (?) self.params set below by ClassicLLH init
 
         self.hist_pars = pars
 
@@ -445,9 +462,11 @@ class WeightLLH(ClassicLLH):
 
         self._setup(exp)
 
-        # calclate splines for all values of splines
+        # calculate splines for all values of splines
         par_grid = dict()
         for par, val in self.params.iteritems():
+            if par!="gamma": # need this since it's hardcoded in weight() - better solution (?)
+                continue
             # create grid of all values that could come up due to boundaries
             # use one more grid point below and above for gradient calculation
             low, high = val[1]
@@ -462,7 +481,7 @@ class WeightLLH(ClassicLLH):
             self._ratio_spline(mc, **dict([(p_i, self._around(t_i))
                                            for p_i, t_i in zip(pars, tup)]))
 
-        # create spatial splines of classic LLH class
+        # create spatial splines of classic LLH class and eff. Area
         super(WeightLLH, self).__call__(exp, mc, livetime, **par_grid)
 
         return
@@ -553,7 +572,8 @@ class WeightLLH(ClassicLLH):
             Spline for parameter values *params*
 
         """
-
+        # does it make sense to use true declination in the histogram
+        # which is ratiod with the experimental one (?)
         mcvars = [mc[p] if not p == "sinDec" else np.sin(mc["trueDec"])
                   for p in self.hist_pars]
 
@@ -657,6 +677,17 @@ class WeightLLH(ClassicLLH):
         # evaluate on finite gridpoints in spectral index gamma
         g1 = self._around(gamma)
         dg = self._precision
+        
+        # if we try to evaluate a point that's too far out
+        # then define the parabola one step inside the bounds
+        # => interpolation turns into extrapolation.
+        low, high = self.params['gamma'][1]
+        if g1<=self._around(low):
+            self._g1_set_higher_counter += 1
+            g1 = self._around(low + dg)
+        if g1>=self._around(high):
+            self._g1_set_lower_counter += 1
+            g1 = self._around(high - dg)
 
         # check whether the grid point of evaluation has changed
         if (np.isfinite(self._g1)
@@ -701,12 +732,15 @@ class PowerLawLLH(WeightLLH):
     --------------------
     seed : float
         Seed for gamma parameter
-    bonds : ndarray (len 2)
+    bounds : ndarray (len 2)
         Bounds for minimisation
 
     """
     def __init__(self, *args, **kwargs):
 
+        # translate seed=seed, bounds=(bound_lo, bound_hi) into 
+        # params = {"gamma":(seed, bounds)}
+        # replacing either with global defaults if necessary
         params = dict(gamma=(kwargs.pop("seed", _gamma_params["gamma"][0]),
                              deepcopy(kwargs.pop("bounds", deepcopy(_gamma_params["gamma"][1])))))
 
@@ -728,6 +762,11 @@ class PowerLawLLH(WeightLLH):
                                                 * livetime * 86400.,
                                        bins=self.sinDec_bins)[0]
                           for gm in gamma_vals]).T
+
+        # normalize bins by their binvolume, one dimension is the parameter
+        # with width of *precision*
+        bin_vol = np.diff(self.sinDec_bins)
+        hist /= bin_vol[:, np.newaxis] * np.full_like(gamma_vals, self._precision)
 
         self._spl_effA = scipy.interpolate.RectBivariateSpline(
                 (self.sinDec_bins[1:] + self.sinDec_bins[:-1]), gamma_vals,
