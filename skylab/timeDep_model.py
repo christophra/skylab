@@ -12,7 +12,7 @@ import lightcurve_auto_threshold as lcat
 
 _parab_cache = np.zeros((0, ), dtype=[("S1", np.float), ("a", np.float),
                                       ("b", np.float)])
-_par_val = np.nan                                      
+_par_val = np.nan                                    
 
 class TimePDF(object):
     r""" time pdf, top level class, for given time returns value
@@ -143,7 +143,11 @@ class LightcurveLLH(WeightLLH):
                 thres_seed      : (default: value from lightcurve_auto_threshold)
                                 Seed for lightcurve threshold
                 thres_bounds    : (default: (0, maximum flux))
-                                Bounds for lightcurve threshold                         
+                                Bounds for lightcurve threshold
+                delay_seed      : (default: 0.)
+                                Seed for lightcurve delay
+                delay_bounds    : (default: (-.5, .5) day)
+                                Bounds for lightcurve delay
         Extra keyword arguments are passed on to the constructor of WeightLLH.
         """
         
@@ -153,6 +157,7 @@ class LightcurveLLH(WeightLLH):
     _th1_set_higher_counter = 0 # counts how often threshold had to be extrapolated downwards
     _filled_time_w_cache = 0 # counts how often time LLH parabola coeffiecients were computed and stored
     _used_time_w_cache = 0 # counts how often time LLH parabola coefficients were loaded from cache
+    _previous_delay = 0. # which delay was set at the previous evaluation of the time weights
     
     _thres_division = 1000 # how many times to divide the lightcuve maximum to get the threshold grid
     
@@ -166,11 +171,19 @@ class LightcurveLLH(WeightLLH):
         lc_thres_seed  = lcat.auto_threshold(lc_bins, lc_fluxes)
         # determine default threshold bounds from the max of the lightcurve
         lc_thres_min = 0. # or should it be lc_fluxes.min() (?)
-        lc_thres_max = lc_fluxes.max()
+        lc_thres_max = lc_fluxes.max()  
+        
+        # Defaults for lightcurve delay (vs.the llh) seed and bounds
+        lc_delay_seed =  0.
+        lc_delay_min  = -.5
+        lc_delay_max  =  .5  
         params = dict(gamma=(kwargs.pop("gamma_seed", ps_model._gamma_params["gamma"][0]),
                              deepcopy(kwargs.pop("gamma_bounds", deepcopy(ps_model._gamma_params["gamma"][1])))),
                       thres=(kwargs.pop("thres_seed", lc_thres_seed),
-                             deepcopy(kwargs.pop("thres_bounds", (lc_thres_min, lc_thres_max)))))
+                             deepcopy(kwargs.pop("thres_bounds", (lc_thres_min, lc_thres_max)))),
+                      delay=(kwargs.pop("delay_seed", lc_delay_seed),
+                             deepcopy(kwargs.pop("delay_bounds", (lc_delay_min, lc_delay_max)))),
+                             )
         if params["thres"][1][1] > lc_fluxes_max:
             raise ValueError("Threshold upper bound %4.2e is higher than lightcurve maximum %4.2e"%(params["thres"][1][1], lc_fluxes_max))
         # set threshold grid precision from "division" of smallest interval
@@ -182,6 +195,8 @@ class LightcurveLLH(WeightLLH):
         r"""this part is similar to the time integrated, but the important difference is that it is in local coodinates
         so that on short time scales the detector special directions are evaluated correctly
         """
+        # We don't do this actually because our time scales are always longer than one day
+
         self.Azimuth_bins_n=15 # is there a good reason these are hardcoded (?)
         self.cosZenith_bins_n=6 # would we ever need to change this (?)
         
@@ -458,7 +473,8 @@ class LightcurveLLH(WeightLLH):
         # check whether the grid point of evaluation has changed
         if (np.isfinite(self._th1)
                 and th1 == self._th1
-                and len(ev) == len(self._time_w_cache)): # this could fail (!)
+                and len(ev) == len(self._time_w_cache)
+                and self._previous_delay==delay): # this could fail (!)
             self._used_time_w_cache += 1
             S1 = self._time_w_cache["S1"]
             a = self._time_w_cache["a"]
@@ -470,9 +486,9 @@ class LightcurveLLH(WeightLLH):
             th0 = self._thres_around(th1 - dth)
             th2 = self._thres_around(th1 + dth)
 
-            S0 = self._w_pdf_dict[(("thres", th0), )].tPDFvals(ev["time"])
-            S1 = self._w_pdf_dict[(("thres", th1), )].tPDFvals(ev["time"])
-            S2 = self._w_pdf_dict[(("thres", th2), )].tPDFvals(ev["time"])
+            S0 = self._w_pdf_dict[(("thres", th0), )].tPDFvals(ev["time"] + delay)
+            S1 = self._w_pdf_dict[(("thres", th1), )].tPDFvals(ev["time"] + delay)
+            S2 = self._w_pdf_dict[(("thres", th2), )].tPDFvals(ev["time"] + delay)
 
             a = (S0 - 2. * S1 + S2) / (2. * dth**2)
             b = (S2 - S0) / (2. * dth)
@@ -486,6 +502,9 @@ class LightcurveLLH(WeightLLH):
             self._time_w_cache["S1"] = S1
             self._time_w_cache["a"] = a
             self._time_w_cache["b"] = b
+        
+        # store previous time delay
+        self._previous_delay = delay
 
         # calculate value at the parabola
         val = a * (thres - th1)**2 + b * (thres - th1) + S1
