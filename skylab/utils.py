@@ -153,7 +153,12 @@ class delta_chi2(object):
         -----------
         data : array
             Data values to be fit
-
+        
+        Optional Parameters
+        --------------------
+        df : float
+            Seed for the number of degrees of freedom.
+        Other parameters are passed on to scipy.stats.chi2.fit - e.g. fscale, floc.
         """
         data = np.asarray(data)
 
@@ -167,8 +172,9 @@ class delta_chi2(object):
             self.f = chi2(*self.par)
 
             return
-
-        self.par = chi2.fit(data[data > 0], **kwargs)
+        
+        df_seed = kwargs.pop('df',2.0)
+        self.par = chi2.fit(data[data > 0], df_seed, **kwargs)
 
         self.f = chi2(*self.par)
 
