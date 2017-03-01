@@ -1021,28 +1021,36 @@ class PointSourceLLH(object):
             Other keyword arguments are passed to the source fitting.
 
         """
+        logger.trace("do_trials: getting kwargs")
         mu_gen = kwargs.pop("mu", repeat((0, None)))
 
         # values for iteration procedure
         n_iter = kwargs.pop("n_iter", _n_trials)
-
+        
+        logger.trace("do_trials: creating array")
         trials = np.empty((n_iter, ), dtype=[("n_inj", np.int),
                                              ("TS", np.float)]
                                             + [(par, np.float)
                                                for par in self.params])
+                                               
 
+        logger.trace("do_trials: getting injection")
         samples = [mu_gen.next() for i in xrange(n_iter)]
         trials["n_inj"] = [sam[0] for sam in samples]
         samples = [sam[1] for sam in samples]
-
+        
+        
         if self.ncpu > 1 and len(samples) > self.ncpu:
+            logger.trace("do_trials: assembling function call arguments for MP")
             args = [(self, np.pi, src_dec, sam, True,
                      dict(kwargs.items()
                           + [("seed", self.random.randint(2**32))]))
                     for sam in samples]
 
+            logger.trace("do_trials: creating multiprocessing pool")
             pool = multiprocessing.Pool(self.ncpu)
 
+            logger.trace("do_trials: computing fs")
             result = pool.map(fs, args)
 
             pool.close()
@@ -1051,11 +1059,13 @@ class PointSourceLLH(object):
             del pool
 
         else:
+            logger.trace("do_trials: just calling fit_source in single thread")
             result = [self.fit_source(np.pi, src_dec, inject=sam,
                                       scramble=True, **kwargs)
                       for sam in samples]
 
         for i, res in enumerate(result):
+            logger.trace("do_trials: assemble output array")
             trials["TS"][i] = res[0]
             for key, val in res[1].iteritems():
                 trials[key][i] = val
@@ -1205,23 +1215,32 @@ class PointSourceLLH(object):
             
             # the "scaling" coordinate transform has to be appplied onto gradients
             # before they are returned
-            grad = grad / self._current_par_scaling
+            # With the bounded_simplex, gradient isn't used
+            # I'm too lazy to make up one for the delay
+            # => comment that out :-)
+            #grad = grad / self._current_par_scaling
 
             # return negative value needed for minimization
             return -fun#, -grad
+
+        logger.trace("fit_source:getting kwargs")
 
         scramble = kwargs.pop("scramble", False)
         inject = kwargs.pop("inject", None)
         kwargs.setdefault("pgtol", _pgtol)
 
+        logger.trace("fit_source: selecting events")
         # Set all weights once for this src location, if not already cached
         self._select_events(src_ra, src_dec, inject=inject, scramble=scramble)
 
+        logger.trace("fit_source: getting seeds")
         # get seeds - from kwargs to fit_source or (default) self.par_seeds
         pars = self.par_seeds
         inds = [i for i, par in enumerate(self.params) if par in kwargs]
         pars[inds] = np.array([kwargs.pop(par) for par in self.params
                                                if par in kwargs])
+                                                                                              
+        logger.trace("fit_source: applying parameter scaling")
         # apply scaling to seeds and bounds
         pars = pars * self._current_par_scaling
         bounds = self.par_bounds * np.atleast_2d(self._current_par_scaling).T
@@ -1234,6 +1253,7 @@ class PointSourceLLH(object):
                                 bounds=bounds,
                                 **kwargs)
         """
+        logger.trace("fit_source: running minimizer")
         # Try using Nelder-Mead/Simplex with hobo bounds
         xmin, fmin, min_dict = utils.bounded_simplex(_llh_nograd, pars, bounds=bounds)
         #------- minimizer diagnostics -----------------------------------------
@@ -1243,6 +1263,7 @@ class PointSourceLLH(object):
         #print("xmin ",xmin)
         #------- minimizer diagnostics -----------------------------------------
         
+        logger.trace("fit_source: undoing parameter scaling")
         # undo the evil scaling we applied before!
         xmin = xmin / self._current_par_scaling
 
@@ -1250,6 +1271,7 @@ class PointSourceLLH(object):
         #print(xmin)
         #------- minimizer diagnostics -----------------------------------------
          
+        logger.trace("fit_source: checking fit results")
         # why do we set fmin=0, nfit=0 IF the bounds include nsources=0 (?)
         if fmin > 0 and (self.par_bounds[0][0] <= 0
                          and self.par_bounds[0][1] >= 0):
@@ -1762,8 +1784,8 @@ class PointSourceLLH(object):
                         print("Fit delta chi2 to background scrambles")
                         fitfun = utils.delta_chi2
                     fit = fitfun(trials["TS"][trials["n_inj"] == 0],
+                                 df=2., # did not used to work - now fixed
                                  # following kwargs are passed to scipy.stats.chi2.fit
-                                 # df=2., #  doesn't work (!) because it's passed as a kwarg, not second arg
                                  floc=0., fscale=1.)
 
                     # give information about the fit
