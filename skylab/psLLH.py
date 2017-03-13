@@ -1220,8 +1220,10 @@ class PointSourceLLH(object):
             if self._N > 0:
                 fun, grad = self.llh(**fit_pars)
             else:
-                fun = 0.
+                # if no sources were detected, simulate GRB likelihood
+                fun = -np.fabs(x[0])
                 grad = np.zeros(len(self.params))
+                grad[0] = -np.sign(x[0])
             
             # the "scaling" coordinate transform has to be appplied onto gradients
             # before they are returned
