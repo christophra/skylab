@@ -1256,12 +1256,26 @@ class PointSourceLLH(object):
         bounds = self.par_bounds * np.atleast_2d(self._current_par_scaling).T
         
         """
+        # L-BFGS-B minimization: not (yet) used in timedep
         # minimizer setup
         xmin, fmin, min_dict = scipy.optimize.fmin_l_bfgs_b(
                                 _llh, pars,
                                 #bounds=self.par_bounds,
                                 bounds=bounds,
                                 **kwargs)
+ 
+        # set up mindict to enter while, exit if fit looks nice
+        i = 0
+        min_dict = dict(warnflag=0, task="FACTR")
+        while min_dict["warnflag"] == 0 and "FACTR" in min_dict["task"]:
+            # no stop due to gradient
+            xmin, fmin, min_dict = scipy.optimize.fmin_l_bfgs_b(
+                                    _llh, pars,
+                                    bounds=self.par_bounds,
+                                    **kwargs)
+            pars[0] = self.random.uniform(0., 2. * self.pars[0])
+            if i > 100:
+                raise RuntimeError("Did not manage good fit")        
         """
         logger.trace("fit_source: running minimizer")
         # Try using Nelder-Mead/Simplex with hobo bounds
