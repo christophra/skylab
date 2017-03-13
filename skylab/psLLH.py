@@ -190,6 +190,7 @@ class PointSourceLLH(object):
     _seed = _seed
     
     # Data sample
+    _fix = False
     _livetime = _livetime
 
     # event selection
@@ -457,7 +458,7 @@ class PointSourceLLH(object):
         self._ev = self.exp[exp_mask]
 
         # update rightascension information for scrambled events
-        if scramble:
+        if scramble and not self.fix:
             if not self.timescramble:
                 self._ev["ra"] = self.random.uniform(0., 2. * np.pi,
                                                      size=len(self._ev))
@@ -520,6 +521,18 @@ class PointSourceLLH(object):
                             val))
             val = np.fabs(np.fmod(val, 2.*np.pi))
         self._delta_ang = float(val)
+
+        return
+    @property
+    def fix(self):
+        return self._fix
+
+    @fix.setter
+    def fix(self, val):
+        val = bool(val)
+        if val and (val^self.fix):
+            print("Change scramble fixing to {0}".format(val))
+            self._fix = val
 
         return
 
@@ -1294,6 +1307,20 @@ class PointSourceLLH(object):
         #------- minimizer diagnostics -----------------------------------------
         #print(xmin)
         #------- minimizer diagnostics -----------------------------------------
+        
+        if xmin[0] < self.par_bounds[0][0]:
+            if self.par_bounds[0][0] < 0 or self.par_bounds[0][0] > 0:
+                logger.error("N_s fit out of bounds "
+                             "({0:.2e}), set to boundary".format(xmin[0]))
+            fmin = _llh(np.append(self.par_bounds[0][0], xmin[1:]))[0]
+            xmin[0] = self.par_bounds[0][0]
+
+        elif xmin[0] > self.par_bounds[0][1]:
+            if self.par_bounds[0][1] < 0 or self.par_bounds[0][1] > 0:
+                logger.error("N_s fit out of bounds "
+                             "({0:.2e}), set to boundary".format(xmin[0]))
+            fmin = _llh(np.append(self.par_bounds[0][1], xmin[1:]))[0]
+            xmin[0] = self.par_bounds[0][1]
          
         logger.trace("fit_source: checking fit results")
         # why do we set fmin=0, nfit=0 IF the bounds include nsources=0 (?)
@@ -2059,6 +2086,16 @@ class MultiPointSourceLLH(PointSourceLLH):
                                    else i[:-len("\t".expandtabs())]
                                  for i in str(self._sams[num]).splitlines()]))
             out_str += "\n" + 67 * "=" + "\n"
+            
+         
+        out_str += "Fit Parameter\tSeed\tBounds\n"
+        pars = self.params
+        seed = self.par_seeds
+        bounds = self.par_bounds
+        for p, s, b in zip(pars, seed, bounds):
+            out_str += "{0:15s}\t{1:.2f}\t{2:.2f} to {3:.2f}\n".format(
+                    p, s, *b)
+        out_str += 67*"-"
 
         return out_str
 
