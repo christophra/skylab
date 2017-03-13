@@ -1216,14 +1216,7 @@ class PointSourceLLH(object):
             x = x / self._current_par_scaling
 
             fit_pars = dict([(par, xi) for par, xi in zip(self.params, x)])
-            # check if events where selected
-            if self._N > 0:
-                fun, grad = self.llh(**fit_pars)
-            else:
-                # if no sources were detected, simulate GRB likelihood
-                fun = -np.fabs(x[0])
-                grad = np.zeros(len(self.params))
-                grad[0] = -np.sign(x[0])
+            fun, grad = self.llh(**fit_pars)
             
             # the "scaling" coordinate transform has to be appplied onto gradients
             # before they are returned
@@ -1244,7 +1237,12 @@ class PointSourceLLH(object):
         logger.trace("fit_source: selecting events")
         # Set all weights once for this src location, if not already cached
         self._select_events(src_ra, src_dec, inject=inject, scramble=scramble)
-
+     
+        if self._N < 1:
+            # No events selected
+            return 0., dict([(par, par_s) if not par == "nsources" else (par, 0.)
+            for par, par_s in zip(self.params, self.par_seeds)])
+        
         logger.trace("fit_source: getting seeds")
         # get seeds - from kwargs to fit_source or (default) self.par_seeds
         pars = self.par_seeds
