@@ -1215,12 +1215,25 @@ class PointSourceLLH(object):
         """
         
         # wrap llh function to work with arrays
-        def _llh_nograd(x, *args):
+        def _llh(x, *args):
             """Scale likelihood variables so that they are both normalized.
             Returns -logLambda which is the test statistic and should
             be distributed with a chi2 distribution assuming the null
             hypothesis is true.
 
+            """
+
+            fit_pars = dict([(par, xi) for par, xi in zip(self.params, x)])
+
+            fun, grad = self.llh(**fit_pars)
+
+            # return negative value needed for minimization
+            return -fun, -grad
+            
+        def _llh_nograd(x, *args):
+            """Wrapper around _llh.
+            (1) Does not return a gradient, for bounded simplex.
+            (2) Accepts "x" with parameter scaling.
             """
             
             # undo scaling to x = ['nsources', 'thres', 'gamma']
@@ -1228,18 +1241,18 @@ class PointSourceLLH(object):
             # this is hacky, but the minimizer wants it that way (!)
             x = x / self._current_par_scaling
 
-            fit_pars = dict([(par, xi) for par, xi in zip(self.params, x)])
-            fun, grad = self.llh(**fit_pars)
+            
+            minus_fun, minus_grad = _llh(x)
             
             # the "scaling" coordinate transform has to be appplied onto gradients
             # before they are returned
             # With the bounded_simplex, gradient isn't used
             # I'm too lazy to make up one for the delay
             # => comment that out :-)
-            #grad = grad / self._current_par_scaling
+            #minus_grad = minus_grad / self._current_par_scaling
 
             # return negative value needed for minimization
-            return -fun#, -grad
+            return minus_fun#, minus_grad
 
         logger.trace("fit_source:getting kwargs")
 
