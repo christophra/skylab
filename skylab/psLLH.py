@@ -100,8 +100,6 @@ _ub_perc = 1.
 _win_points = 50
 
 
-
-
 class PointSourceLLH(object):
     r"""Basic Point Source Likelihood class
 
@@ -243,11 +241,7 @@ class PointSourceLLH(object):
             Configuration parameters to assign values to class attributes.
 
         """
-        #import inspect
-        #def lineno():
-        #    """Returns the current line number in our program."""
-        #    return inspect.currentframe().f_back.f_lineno
-        ##print(lineno())
+
         if upscale and not scramble:
             raise ValueError("Cannot upscale UNBLINDED data, "
                              "turn on scrambling!")
@@ -260,8 +254,7 @@ class PointSourceLLH(object):
             timescramble = False
         self.timescramble = timescramble
         self.timegen = timegen
-        
-        ##print(lineno())
+
         # UPSCALING
         if upscale:
             print("Upscale exp. data distribution!")
@@ -307,8 +300,7 @@ class PointSourceLLH(object):
             livetime = up_livetime
 
             exp = RS.choice(exp, size=mu)
-        
-        #print(lineno())
+
         # store exp data, add sinDec information if not available
         self.exp = exp
         if not "sinDec" in self.exp.dtype.fields:
@@ -324,22 +316,18 @@ class PointSourceLLH(object):
             mc = numpy.lib.recfunctions.append_fields(
                     mc, "trueSinDec", np.sin(mc["trueDec"]),
                     dtypes=np.float, usemask=False)
-                    
-        #print(lineno())
+
         # Experimental data values
         self.livetime = livetime
 
-        #print(lineno())
         # set llh model
         self.llh_model = kwargs.pop("llh_model", ps_model.ClassicLLH()), mc
         # Now we can also cache self._current_par_scaling
         self._current_par_scaling = self.par_scaling
-        
-        #print(lineno())
+
         # set all other parameters
         set_pars(self, **kwargs)
 
-        #print(lineno())
         # scramble data if not unblinded. Do this after seed has been set
         if scramble:
             if not self.timescramble:
@@ -351,8 +339,7 @@ class PointSourceLLH(object):
             print("\t####################################\n"
                   "\t# Working on >> UNBLINDED << data! #\n"
                   "\t####################################\n")
-                  
-        #print(lineno())
+
         # background probability will not change, calculate now
         self.exp = numpy.lib.recfunctions.append_fields(
             self.exp, "B", self.llh_model.background(self.exp),
@@ -1040,20 +1027,18 @@ class PointSourceLLH(object):
 
         # values for iteration procedure
         n_iter = kwargs.pop("n_iter", _n_trials)
-        
+
         logger.trace("do_trials: creating array")
         trials = np.empty((n_iter, ), dtype=[("n_inj", np.int),
                                              ("TS", np.float)]
                                             + [(par, np.float)
                                                for par in self.params])
-                                               
 
         logger.trace("do_trials: getting injection")
         samples = [mu_gen.next() for i in xrange(n_iter)]
         trials["n_inj"] = [sam[0] for sam in samples]
         samples = [sam[1] for sam in samples]
-        
-        
+
         if self.ncpu > 1 and len(samples) > self.ncpu:
             logger.trace("do_trials: assembling function call arguments for MP")
             args = [(self, src_ra, src_dec, sam, True,
@@ -1119,7 +1104,7 @@ class PointSourceLLH(object):
 
         SoB = self._ev_S / self._ev["B"]
 
-        w, grad_w = self.llh_model.weight(self._ev, **fit_pars)        
+        w, grad_w = self.llh_model.weight(self._ev, **fit_pars)
 
         x = (SoB * w - 1.) / N
 
@@ -1138,7 +1123,7 @@ class PointSourceLLH(object):
         print("x", x.sum(), np.any(np.isinf(x)))
         #------------------------ logLambda==-inf diagnostics ------------------
         """
-        
+
         # select events close to divergence
         xmask = alpha > aval
 
@@ -1150,8 +1135,8 @@ class PointSourceLLH(object):
                       - 1./2./(1.+aval)**2 * (alpha[~xmask]-aval)**2)
         funval = funval.sum()
         if N > n:
-             funval += (N - n) * np.log1p(-nsources / N)
-        
+            funval += (N - n) * np.log1p(-nsources / N)
+
         # gradients
 
         # in likelihood function
@@ -1213,7 +1198,7 @@ class PointSourceLLH(object):
             Parameters passed to the L-BFGS-B minimiser.
 
         """
-        
+
         # wrap llh function to work with arrays
         def _llh(x, *args):
             """Scale likelihood variables so that they are both normalized.
@@ -1263,12 +1248,12 @@ class PointSourceLLH(object):
         logger.trace("fit_source: selecting events")
         # Set all weights once for this src location, if not already cached
         self._select_events(src_ra, src_dec, inject=inject, scramble=scramble)
-     
+
         if self._N < 1:
             # No events selected
             return 0., dict([(par, par_s) if not par == "nsources" else (par, 0.)
-            for par, par_s in zip(self.params, self.par_seeds)])
-        
+                             for par, par_s in zip(self.params, self.par_seeds)])
+
         logger.trace("fit_source: getting seeds")
         # get seeds - from kwargs to fit_source or (default) self.par_seeds
         pars = self.par_seeds
@@ -1286,10 +1271,9 @@ class PointSourceLLH(object):
         # minimizer setup
         xmin, fmin, min_dict = scipy.optimize.fmin_l_bfgs_b(
                                 _llh, pars,
-                                #bounds=self.par_bounds,
-                                bounds=bounds,
+                                bounds=self.par_bounds,
                                 **kwargs)
- 
+
         # set up mindict to enter while, exit if fit looks nice
         i = 1
         while min_dict["warnflag"] == 2 and "FACTR" in min_dict["task"]:
@@ -1303,7 +1287,7 @@ class PointSourceLLH(object):
                                     _llh, pars,
                                     bounds=self.par_bounds,
                                     **kwargs)
-                                    
+
             i += 1
         """
         logger.trace("fit_source: running minimizer")
@@ -1605,7 +1589,7 @@ class PointSourceLLH(object):
         Parameters
         ----------
         src_ra : float
-            Source position(s)        
+            Source position(s)
         src_dec : float
             Source position(s)
         alpha : array-like (m, )
@@ -2102,8 +2086,7 @@ class MultiPointSourceLLH(PointSourceLLH):
                                    else i[:-len("\t".expandtabs())]
                                  for i in str(self._sams[num]).splitlines()]))
             out_str += "\n" + 67 * "=" + "\n"
-            
-         
+
         out_str += "Fit Parameter\tSeed\tBounds\n"
         pars = self.params
         seed = self.par_seeds
@@ -2295,7 +2278,6 @@ class MultiPointSourceLLH(PointSourceLLH):
             Gradient at the point *fit_pars*.
 
         """
-
 
         src_dec = self._src_dec
         nsources = fit_pars.pop("nsources")

@@ -102,42 +102,7 @@ def rotate_struct(ev, ra, dec):
 
     return drop_fields(rot, mc)
 
-def rotate_struct(ev, ra, dec):
-    r"""Wrapper around the rotate-method in skylab.utils for structured
-    arrays.
 
-    Parameters
-    ----------
-    ev : structured array
-        Event information with ra, sinDec, plus true information
-
-    ra, dec : float
-        Coordinates to rotate the true direction onto
-
-    Returns
-    --------
-    ev : structured array
-        Array with rotated value, true information is deleted
-
-    """
-    names = ev.dtype.names
-
-    rot = np.copy(ev)
-
-    # Function call
-    rot["ra"], rot_dec = rotate(ev["trueRa"], ev["trueDec"],
-                                ra * np.ones(len(ev)), dec * np.ones(len(ev)),
-                                ev["ra"], np.arcsin(ev["sinDec"]))
-
-    if "dec" in names:
-        rot["dec"] = rot_dec
-    rot["sinDec"] = np.sin(rot_dec)
-
-    # "delete" Monte Carlo information from sampled events
-    mc = ["trueRa", "trueDec", "trueE", "ow"]
-
-    return drop_fields(rot, mc)
-    
 class Injector(object):
     r"""Base class for Signal Injectors defining the essential classes needed
     for the LLH evaluation.
