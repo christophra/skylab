@@ -245,8 +245,7 @@ class PointSourceLLH(object):
         if upscale and not scramble:
             raise ValueError("Cannot upscale UNBLINDED data, "
                              "turn on scrambling!")
-        
-        ##print(lineno())                     
+                     
         # TIME SCRAMBLING
         if timescramble and (timegen is None):
             raise ValueError("Cannot scramble in time without a generator, "
