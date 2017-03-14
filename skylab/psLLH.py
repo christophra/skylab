@@ -523,6 +523,19 @@ class PointSourceLLH(object):
         return
 
     @property
+    def fix(self):
+        return self._fix
+
+    @fix.setter
+    def fix(self, val):
+        val = bool(val)
+        if val and (val^self.fix):
+            print("Change scramble fixing to {0}".format(val))
+            self._fix = val
+
+        return
+
+    @property
     def follow_up_factor(self):
         return self._follow_up_factor
 
