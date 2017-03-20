@@ -658,6 +658,21 @@ class FlareInjector(PointSourceInjector):
 
         return
         
+    def __str__(self):
+        r"""String representation showing some basic parameters of the injector.
+
+        """
+        # Most are taken from PointSourceInjector.__str__
+        sout = super(FlareInjector,self).__str__()
+        # Add additional ones before last line of dashes
+        sout_split = sout.split('\n')
+        sout_split.insert(-1,'\tLightcurve threshold : {0:2.2e} deg\n'.format(self.threshold))
+        # Join into one string again
+        sout = '\n'.join(sout_split)
+        
+        return sout
+        
+        
     def _weights(self):
         r"""Setup weights for given models.
 
