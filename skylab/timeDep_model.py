@@ -6,9 +6,7 @@ from scipy.interpolate import RectBivariateSpline
 from copy import deepcopy
 from itertools import product
 from .utils import parabola_window
-
-# integrate this into Skylab (!)
-import lightcurve_auto_threshold as lcat
+import lightcurve_helpers
 
 _parab_cache = np.zeros((0, ), dtype=[("S1", np.float), ("a", np.float),
                                       ("b", np.float)])
@@ -140,7 +138,7 @@ class LightcurveLLH(WeightLLH):
                                 Seed for spectral index.
                 gamma_bounds    : (default: ps_model._gamma_params["gamma"][1])
                                 Bounds for spectral index.
-                thres_seed      : (default: value from lightcurve_auto_threshold)
+                thres_seed      : (default: value from automatic threshold)
                                 Seed for lightcurve threshold
                 thres_bounds    : (default: (0, maximum flux))
                                 Bounds for lightcurve threshold
@@ -168,7 +166,7 @@ class LightcurveLLH(WeightLLH):
         lc_bins = np.array(zip(*self.timePDF.TBS)[0]) # last entry is last block's upper edge
         lc_fluxes_max = lc_fluxes.max()
         # determine default threshold seed from the lightcurve
-        lc_thres_seed  = lcat.auto_threshold(lc_bins, lc_fluxes)
+        lc_thres_seed  = lightcurve_helpers.auto_threshold(lc_bins, lc_fluxes)
         # determine default threshold bounds from the max of the lightcurve
         lc_thres_min = 0. # or should it be lc_fluxes.min() (?)
         lc_thres_max = lc_fluxes.max()  
