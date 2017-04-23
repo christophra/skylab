@@ -7,125 +7,13 @@ from copy import deepcopy
 from itertools import product
 from .utils import parabola_window
 import lightcurve_helpers
+from .timeDep_pdf import TimePDFBinned
 
 _parab_cache = np.zeros((0, ), dtype=[("S1", np.float), ("a", np.float),
                                       ("b", np.float)])
 _par_val = np.nan                                    
 
-class TimePDF(object):
-    r""" time pdf, top level class, for given time returns value
-    can be either binned pdf or a function (Gaussian)
-    """
-    def __init__(self,tstart,tend):
-        self.tstart=tstart
-        self.tend=tend
-        self.changed=True # does this have a point (?) is the name appropriate (?)
-        
-    def tPDFvals(self,ev_times): # what is the point of another name for  the method (?)
-        return self.tPDFval_vect(self,ev_times)
 
-class TimePDFBinned(TimePDF):
-    r""" the time pdf for the case it is binned, i.e. Fermi lightcurve or a Box.
-    takes as imput time_bin_series , which is list of [binstart,value]
-    everything before the first bin will be evaluated as zero, the last point should be defining the end of the time PDF 
-    and should be of the form [binstart,-1]
-    """
-    
-    def __init__(self,tstart,tend,time_bin_series,threshold=0):
-        """Constructor which creates a TimePDFBinned within
-            [tstart,tend] : float, float
-        by applying
-            threshold : float
-                the cutoff which the lightcurve has to exceed
-        to
-            time_bin_series : float, ndarray-like, (N+1) x 2
-                [ [lower edge_1, level_1] , ... , [upper edge_N, irrelevant value]]
-                
-        """
-        super(TimePDFBinned, self).__init__(tstart,tend)
-        self.TBS=time_bin_series
-        self.threshold = threshold
-        
-    def __str__(self):
-        r"""String representation of TimePDFBinned.
-
-        """
-        out_str = "{0:s}\n".format(self.__repr__())
-        out_str += 67*"~"+"\n"
-        out_str += "start time  : {0:d}\n".format(int(self.tstart))
-        out_str += "end time  : {0:d}\n".format(int(self.tend))
-        out_str += "threshold  : {0:4e}\n".format(self.threshold)
-        out_str += 67*"~"+"\n"
-
-        return out_str
-    
-    @property
-    def threshold(self):
-        return self._threshold
-    @threshold.setter
-    def threshold(self, val):
-        self._threshold = val
-        self.TBS_to_PDF(val)
-    
-    def TBS_to_PDF(self,threshold=0):
-        r"""Turns list of tuples self.TBS to recarray self.tPDF
-        by filling bins and values into the latter as
-                    tPDF.t = [tstart,bins]
-                    tPDF.v = [0,fluxes,0]
-        then selecting tPDF.v above threshold and normalizing."""
-        self.tPDF=np.recarray((len(self.TBS)+1,), dtype=[('t', float), ('v', float), ('d', float)])
-        self.tPDF.t=np.asarray((self.tstart,)+zip(*self.TBS)[0])
-        self.tPDF.v=np.asarray((0.,)+zip(*self.TBS)[1][:-1]+(0.,))
-        self.tPDF.d=np.hstack((1.,self.tPDF.t[2:]-self.tPDF.t[1:-1],1.)) # outer values only used when v[0]=v[N]=0
-        # self.tPDF.v[self.tPDF.v < self.threshold] = 0. # BlockTimePdf behaviour
-        # is same behaviour as BlockTimePdf.
-        # BUT used in current Track: BlockTimePdf1
-        # which DOES subtract!
-        # ergo:
-        self.tPDF.v = self.tPDF.v - self.threshold # BlockTimePdf1 behaviour
-        self.tPDF.v[self.tPDF.v < 0.] = 0.
-        norm=(self.tPDF.v * self.tPDF.d)[:len(self.tPDF)-1].sum()
-        #for i in range(len(self.tPDF)-1):
-        #    norm+=self.tPDF.v[i]*self.tPDF.d[i]
-        self.tPDF.v=self.tPDF.v/norm
-        
-   
-    # try replacing with smoothed tPDF
-    @staticmethod
-    #@np.vectorize # Vectorizing multiplies overhead (!)
-    def tPDFval_vect(self,ev_time):
-        r"""Method which evaluates the PDF at ev_time, vectorized."""
-        #return self.tPDF.v[max(0,np.searchsorted(self.tPDF.t,ev_time)-1)] # max doesn't handle NumPy arrays (!)
-        return self.tPDF.v[np.maximum(0,np.searchsorted(self.tPDF.t,ev_time)-1)]
-
-
-    @staticmethod
-    def tPDFval_smooth(self,ev_time):
-        r"""Method which evaluates the PDF at ev_time, vectorized, smoothed with parabola window.
-        This however entirely misses the point of getting a smoother behaviour w.r.t. varying thres.
-        For that, one would need to include this shape into the LC normalisation instead of replacing each
-        block by the same window function that does not change shape."""
-        index_i = np.maximum(0,np.searchsorted(self.tPDF.t,ev_time)-1)
-        v_i = self.tPDF.v[index_i] # block pdf value
-        res_i = (ev_time - self.tPDF.t[index_i])/self.tPDF.d[index_i] # time residual in window
-        return parabola_window(res_i)*v_i
-        
-        
-class TimePDFGauss(TimePDF):
-    r""" the time pdf for the case of a gaussuan shaped flare """
-    
-    def __init__(self,tstart,tend):
-        super(TimePDFGauss, self).__init__(tstart,tend)        
-        self.mean=(tend-tstart)/2. # what is the point of this definition (?)
-        self.sigma=self.mean/100. # dito (?)
-        
-    def setMeanAndSigma(self,mean,sigma):
-        self.mean=mean
-        self.sigma=sigma
-        
-    def tPDFvals(self,ev_times):
-        gfcn=norm(loc = self.mean, scale = self.sigma)
-        return gfcn.pdf(ev_times)
         
 class LightcurveLLH(WeightLLH):
     r""" Simplest time dep. search likelihood.
@@ -159,7 +47,12 @@ class LightcurveLLH(WeightLLH):
     
     _thres_division = 1000 # how many times to divide the lightcuve maximum to get the threshold grid
     
-    def __init__(self, twodim_bins=ps_model._2dim_bins,timePDF=None, twodim_range=None, thres_division=_thres_division, **kwargs):
+    def __init__(self,
+                 twodim_bins=ps_model._2dim_bins,
+                 timePDF=None,
+                 twodim_range=None,
+                 thres_division=_thres_division,
+                 **kwargs):
 
         self.timePDF=timePDF
         lc_fluxes = np.array(zip(*self.timePDF.TBS)[1][:-1]) # last entry is not flux
@@ -202,7 +95,7 @@ class LightcurveLLH(WeightLLH):
         r"""Set up everything for weight calculation.
 
         """
-        self._w_pdf_dict = dict()
+        #self._w_pdf_dict = dict()
         super(LightcurveLLH, self)._setup(exp)
     
     def __call__(self, exp, mc,livetime):
@@ -212,31 +105,6 @@ class LightcurveLLH(WeightLLH):
         # set up sinDec spline, and energy spline.
         # calls _setup  to setup everything for energy and time weight calculation.
         super(LightcurveLLH, self).__call__(exp, mc,livetime)
-
-        # calculate time PDFs for grid of threshold values
-        # in principle it can be more parameters, so the code is a bit complicated
-        par_grid = dict()
-        for par, val in self.params.iteritems():
-            if par!="thres": # need this since it's hardcoded in weight() - better solution (?)
-                continue
-            # create grid of threshold values within boundaries
-            low, high = val[1]
-            # `high` can be flux maximum, for which PDF is undefined
-            # => arange does not include `high`
-            grid = np.arange(low,
-                             high,
-                             self._thres_precision)
-            par_grid[par] = grid
-
-        pars = par_grid.keys()
-        for tup in product(*par_grid.values()):
-            # cache the pdf - i.e. set threshold and normalise
-            param_dict = dict([(p_i, self._thres_around(t_i)) for p_i, t_i in zip(pars, tup)])
-            self._w_pdf_dict[tuple(param_dict.items())] = TimePDFBinned(self.timePDF.tstart,
-                                                                  self.timePDF.tend,
-                                                                  self.timePDF.TBS,
-                                                                  threshold=param_dict["thres"],
-                                                                 )
                                            
         
         # histogram exp data in Azimuth, cosZenith.
@@ -331,6 +199,37 @@ class LightcurveLLH(WeightLLH):
         #flatTimePDF=1./(self.timePDF.tend - self.timePDF.tstart) # included in _time_weight (!)
         #return self.background_vect(ev["Azimuth"spatial ],ev["sinDec"],ev["sinDec"]) # don't use local coords (!)
         return 1. / 2. / np.pi * np.exp(self.bckg_spline(ev['sinDec']))
+    
+    def signal(self, src_ra, src_dec, src_lc, ev):
+        r"""Space-time likelihood for events given source position and lightcurve
+
+        Signal is assumed to cluster around source position.
+        The distribution is assumed to be well approximated by a gaussian
+        locally.
+        The times of the signal are assumed to be proportional to the lightcurve.
+
+        Parameters
+        -----------
+        src_ra : float
+            Source right ascension (radians).
+        src_dec : float
+            Source declination (radians).
+        src_lc : TimePDF or derived classes
+            Time PDF assumed for the source.
+        ev : structured array
+            Event array, import information: sinDec, ra, sigma, time.
+
+        Returns
+        --------
+        P : array-like
+            Spatial signal probability for each event
+
+        """
+        
+        S_spatial  = super(LightcurveLLH, self).signal(src_ra, src_dec, src_lc, ev)
+        S_temporal = src_lc.tPDFvals(ev["time"])
+        
+        return S_spatial*S_temporal
         
         
     def _effA(self, mc, livetime, **pars):
@@ -385,135 +284,6 @@ class LightcurveLLH(WeightLLH):
         return val, dict(gamma=grad)
         
     
-    
-    def _get_weights(self, mc, **params):
-        r"""Return event weights in MonteCarlo set corresponding to
-        only an unnormalized power-law flux E^(-gamma), no other dependency.
-        Used for making (splined) histograms of signal weight.
-        Parameters:
-        -----------
-        mc : structured array
-                MonteCarlo data
-        gamma : float
-                Spectral index
-        
-        Returns:
-        -----------
-        weights : array-like
-                Energy-dependent weights for all MonteCarlo events.
-        """
-        return mc["ow"] * mc["trueE"]**(-params["gamma"])
-    
-    def _thres_around(self, value):
-        r"""Round a value to the nearest grid point defined in the class.
-        This is a different grid than for other parameters, since it's oriented
-        on an even division of the params['thres'] bounds.
-
-        Parameters
-        -----------
-        value : array-like
-            Values to round to precision.
-
-        Returns
-        --------
-        round : array-like
-            Rounded values.
-
-        """
-        return (np.around(float(value - self.params['thres'][1][0]) / self._thres_precision)\
-                * self._thres_precision)\
-                 + self.params['thres'][1][0]
-    
-    def _time_weight(self, ev, **params):
-        r"""Evaluate time weights from cached pdf's with `params`.
-        Also determine the gradient.
-        This computation is separate from the energy weights since they are uncorrelated.
-        
-        Parameters
-        -----------
-        ev : structured array
-            Events to be evaluated
-
-        **params : float
-            Dictionary of parameters, of which M are used for time weights.
-            Currently `thres` and `delay`.
-
-        Returns
-        --------
-        val : array-like (N), N events
-            Function value.
-
-        grad : array-like (N, M), N events in M parameter dimensions
-            Gradients at function value.
-        """
-        thres = params["thres"]
-        delay = params["delay"]
-        
-        # evaluate on finite gridpoints in threshold thres
-        th1 = self._thres_around(thres)
-        dth = self._thres_precision
-        # the parabola evaluation doesn't work for outer grid points
-        # i.e. [lower bound, upper bound)
-        # in which case: define the parabola one step away
-        low, high = self.params['thres'][1]
-        if th1<=self._thres_around(low):
-            self._th1_set_higher_counter += 1
-            #print "setting th1 from %4e"%th1,
-            th1 = self._thres_around(low + dth)
-            #print "to %4e"%th1
-        if th1>=self._thres_around(high - dth):
-            self._th1_set_lower_counter += 1
-            #print "setting th1 from %4e"%th1,
-            th1 = self._thres_around(high - 2*dth)
-            #print "to %4e"%th1
-        # the rest works just the same, only then it's an extrapolation    
-
-        # check whether the grid point of evaluation has changed
-        if (np.isfinite(self._th1)
-                and th1 == self._th1
-                and len(ev) == len(self._time_w_cache)
-                and self._previous_delay==delay): # this could fail (!)
-            self._used_time_w_cache += 1
-            S1 = self._time_w_cache["S1"]
-            a = self._time_w_cache["a"]
-            b = self._time_w_cache["b"]
-            
-        else:
-            self._filled_time_w_cache += 1
-            # evaluate neighbouring gridpoints and parametrize a parabola
-            th0 = self._thres_around(th1 - dth)
-            th2 = self._thres_around(th1 + dth)
-
-            S0 = self._w_pdf_dict[(("thres", th0), )].tPDFvals(ev["time"] + delay)
-            S1 = self._w_pdf_dict[(("thres", th1), )].tPDFvals(ev["time"] + delay)
-            S2 = self._w_pdf_dict[(("thres", th2), )].tPDFvals(ev["time"] + delay)
-
-            a = (S0 - 2. * S1 + S2) / (2. * dth**2)
-            b = (S2 - S0) / (2. * dth)
-
-            # cache values
-            self._th1 = th1
-
-            self._time_w_cache = np.zeros((len(ev),),
-                                     dtype=[("S1", np.float), ("a", np.float),
-                                            ("b", np.float)])
-            self._time_w_cache["S1"] = S1
-            self._time_w_cache["a"] = a
-            self._time_w_cache["b"] = b
-        
-        # store previous time delay
-        self._previous_delay = delay
-
-        # calculate value at the parabola
-        val = a * (thres - th1)**2 + b * (thres - th1) + S1
-        grad = 2. * a * (thres - th1) + b
-        
-        # normalize with flat background time pdf
-        w_B =  1./(self.timePDF.tend - self.timePDF.tstart)
-        val = val / w_B
-        grad = grad / w_B
-
-        return val, np.atleast_2d(grad)
         
     def reset(self):
         r"""Reset all cached values for energy and time weights.
@@ -522,33 +292,4 @@ class LightcurveLLH(WeightLLH):
         super(LightcurveLLH, self).reset()
         self._time_w_cache = deepcopy(_parab_cache)
 
-        return    
-        
-    def weight(self, ev, **params):
-        r"""Return weight, gradient from the parent class with an additional
-        time-dependent factor on the weight, given by tPDFvals.
-        This is the event weight which is evaluated for each event, LLH call.
-        Parameters:
-        -----------
-        ev      : structured array
-                Event data. Has to have column "time" for time-dependent weight.
-        params  : dict of keyword arguments (optional)
-                  Contains threshold for time-dependent weights.
-                  Others, like gamma, are passed to WeightLLH.weight.
-        Returns:
-        -----------
-        val     : array
-                Weight values corresponding, with factor tPDFvals(ev["time"]).
-        grad_w  : array
-                Same gradient as from WeightLLH.
-        """
-        # get time weights and gradients
-        t_weight, t_grad = self._time_weight(ev, **params)
-        # compute energy weights
-        e_weight, e_grad = super(LightcurveLLH, self).weight(ev, **params)
-        
-        # combine energy and time
-        val = e_weight * t_weight # weight is an array => multiply
-        grad_w = np.vstack((e_grad, t_grad)) # grad is a 2d array => append
-        
-        return val, grad_w
+        return
