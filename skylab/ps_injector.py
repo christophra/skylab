@@ -47,7 +47,6 @@ import scipy.interpolate
 # local package imports
 from . import set_pars
 from .utils import rotate, times, rotate_2d
-from .timeDep_model import TimePDFBinned
 
 # get module logger
 def trace(self, message, *args, **kwargs):
