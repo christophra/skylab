@@ -1,5 +1,6 @@
 import ps_model
 WeightLLH = ps_model.WeightLLH
+PowerLawLLH = ps_model.PowerLawLLH
 import numpy as np
 from scipy.stats import norm
 from scipy.interpolate import RectBivariateSpline
@@ -228,9 +229,21 @@ class LightcurveLLH(WeightLLH):
             Spatial signal probability for each event
 
         """
+        #convert src_ra, dec to numpy arrays if not already done
+        src_ra = np.atleast_1d(src_ra)[:,np.newaxis]
+        src_dec = np.atleast_1d(src_dec)[:,np.newaxis]
+        
+        # same for the lightcurve
+        if not isinstance(src_lc, list):
+            src_lc = [src_lc]
+            
+        assert len(src_dec)==len(src_lc)
         
         S_spatial  = super(LightcurveLLH, self).signal(src_ra, src_dec, src_lc, ev,**params)
-        S_temporal = src_lc.tPDFvals(ev["time"],**params)
+        
+        S_temporal = np.zeros_like(S_spatial) # has same shape: sources x events
+        for i_source in range(len(src_lc)):
+            S_temporal[i_source] = src_lc[i_source].tPDFvals(ev["time"],**params)
         
         return S_spatial*S_temporal
         
