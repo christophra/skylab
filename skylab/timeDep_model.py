@@ -200,7 +200,7 @@ class LightcurveLLH(WeightLLH):
         #return self.background_vect(ev["Azimuth"spatial ],ev["sinDec"],ev["sinDec"]) # don't use local coords (!)
         return 1. / 2. / np.pi * np.exp(self.bckg_spline(ev['sinDec']))
     
-    def signal(self, src_ra, src_dec, src_lc, ev):
+    def signal(self, src_ra, src_dec, src_lc, ev, **params):
         r"""Space-time likelihood for events given source position and lightcurve
 
         Signal is assumed to cluster around source position.
@@ -218,6 +218,9 @@ class LightcurveLLH(WeightLLH):
             Time PDF assumed for the source.
         ev : structured array
             Event array, import information: sinDec, ra, sigma, time.
+        params : dict
+            Further parameters to the signal likelihood. ATTN: Currently useless,
+            since signal(...) is not evaluated again during LLH minimization.
 
         Returns
         --------
@@ -226,8 +229,8 @@ class LightcurveLLH(WeightLLH):
 
         """
         
-        S_spatial  = super(LightcurveLLH, self).signal(src_ra, src_dec, src_lc, ev)
-        S_temporal = src_lc.tPDFvals(ev["time"])
+        S_spatial  = super(LightcurveLLH, self).signal(src_ra, src_dec, src_lc, ev,**params)
+        S_temporal = src_lc.tPDFvals(ev["time"],**params)
         
         return S_spatial*S_temporal
         

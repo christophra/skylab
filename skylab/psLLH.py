@@ -1214,27 +1214,28 @@ class PointSourceLLH(object):
             # return negative value needed for minimization
             return -fun, -grad
             
-        def _llh_nograd(x, *args):
-            """Wrapper around _llh.
-            (1) Does not return a gradient, for bounded simplex.
-            (2) Accepts "x" with parameter scaling.
-            """
-            
+        def _llh_scaled(x, *args):
+            """Wrapper around _llh. Wrapper around _llh. Accepts "x" with parameter scaling, passes it
+            on without."""
             # undo scaling to x = ['nsources', 'thres', 'gamma']
             # which is e.g. [1., 1e7, 1.]
             # this is hacky, but the minimizer wants it that way (!)
             x = x / self._current_par_scaling
-
             
             minus_fun, minus_grad = _llh(x)
             
             # the "scaling" coordinate transform has to be appplied onto gradients
             # before they are returned
-            # With the bounded_simplex, gradient isn't used
-            # I'm too lazy to make up one for the delay
-            # => comment that out :-)
-            #minus_grad = minus_grad / self._current_par_scaling
-
+            minus_grad = minus_grad / self._current_par_scaling
+            # OBS: That means, every parameter needs a gradient!
+            # E.h. if `delay` is reintroduced as a free parameter
+            
+            return minus_fun, minus_grad
+            
+        def _llh_nograd(x, *args):
+            """Wrapper around _llh_scaled. Suppresses gradient, for bounded simplex.
+            """
+            minus_fun, minus_grad = _llh_scaled(x)
             # return negative value needed for minimization
             return minus_fun#, minus_grad
 
