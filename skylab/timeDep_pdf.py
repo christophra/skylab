@@ -79,7 +79,7 @@ class TimePDFBinned(TimePDF):
         self.tPDF.v=self.tPDF.v/norm
         
    
-    # try replacing with smoothed tPDF
+    
     @staticmethod
     #@np.vectorize # Vectorizing multiplies overhead (!)
     def tPDFval_vect(self,ev_time):
@@ -87,7 +87,7 @@ class TimePDFBinned(TimePDF):
         #return self.tPDF.v[max(0,np.searchsorted(self.tPDF.t,ev_time)-1)] # max doesn't handle NumPy arrays (!)
         return self.tPDF.v[np.maximum(0,np.searchsorted(self.tPDF.t,ev_time)-1)]
 
-
+    # try replacing with smoothed tPDF
     @staticmethod
     def tPDFval_smooth(self,ev_time):
         r"""Method which evaluates the PDF at ev_time, vectorized, smoothed with parabola window.

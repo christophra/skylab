@@ -14,9 +14,9 @@ import scipy.interpolate
 
 # local package imports
 from . import set_pars
-from .utils import rotate, times, rotate_2d, times
+from .utils import rotate, rotate_2d, times
 from .ps_injector import PointSourceInjector, StackingPointSourceInjector
-from .ps_injector import logger, _deg, _ext
+from .ps_injector import logger, _deg, _ext, rotate_struct
 from .timeDep_pdf import TimePDFBinned
 
 
@@ -274,7 +274,9 @@ class FlareStackingInjector(StackingPointSourceInjector): # (or base it on Flare
         sout = super(FlareStackingInjector,self).__str__()
         # Add additional ones before last line of dashes
         sout_split = sout.split('\n')
-        sout_split.insert(-1,''.join(['\tLightcurve threshold : {0:2.2e} deg\n'.format(th) for th in self.threshold])
+        sout_split
+        for th in self.threshold:
+            sout_split.insert(-1,'\tLightcurve threshold : {0:2.2e} deg\n'.format(th))
         # Join into one string again
         sout = '\n'.join(sout_split)
         return sout
@@ -404,7 +406,7 @@ class FlareStackingInjector(StackingPointSourceInjector): # (or base it on Flare
                 # only one sample, just return recarray
                 sam_ev = np.copy(self.mc[enums[0]][sam_idx["idx"]]) # why need copy (?)
                 src_ind = sam_idx['src_idx']
-                sam_ev_rot = rotate_struct(sam_ev, src_ra[src_ind], self.src_dec[src_ind]])
+                sam_ev_rot = rotate_struct(sam_ev, src_ra[src_ind], self.src_dec[src_ind])
                 # insert times here
                 # for each source that is involved in sam_ev:
                 for i_src in range(src_ind.max()+1):
