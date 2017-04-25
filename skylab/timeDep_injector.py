@@ -14,7 +14,7 @@ import scipy.interpolate
 
 # local package imports
 from . import set_pars
-from .utils import rotate, times, rotate_2d
+from .utils import rotate, times, rotate_2d, times
 from .ps_injector import PointSourceInjector, StackingPointSourceInjector
 from .ps_injector import logger, _deg, _ext
 from .timeDep_pdf import TimePDFBinned

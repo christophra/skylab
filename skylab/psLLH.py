@@ -40,6 +40,7 @@ import scipy.interpolate
 import scipy.optimize
 import scipy.stats
 from scipy.signal import convolve2d
+import scipy.sparse as sps
 
 # local package imports
 from . import set_pars
@@ -53,6 +54,19 @@ def trace(self, message, *args, **kwargs):
     """
     if self.isEnabledFor(5):
         self._log(5, message, args, **kwargs)
+
+def csr_vappend(a,b):
+    r""" Takes in 2 csr_matrices and appends the second one to the bottom of the first one. 
+        Much faster than scipy.sparse.vstack but assumes the type to be csr and overwrites
+        the first matrix instead of copying it. The data, indices, and indptr still get copied.
+    """
+
+    a.data = np.hstack((a.data,b.data))
+    a.indices = np.hstack((a.indices,b.indices))
+    a.indptr = np.hstack((a.indptr,(b.indptr + a.nnz)[1:]))
+    a._shape = (a.shape[0]+b.shape[0],b.shape[1])
+    return a
+
 
 logging.addLevelName(5, "TRACE")
 logging.Logger.trace = trace
@@ -89,6 +103,7 @@ _nsource_bounds = (0., 1000.)
 _nsource_rho = 0.9
 _out_print = 0.1
 _pgtol = 1.e-3
+_factr = 1.e6
 _pVal = lambda TS, sinDec: TS
 _rho_max = 0.95
 _src_dec = np.nan
@@ -443,7 +458,7 @@ class PointSourceLLH(object):
         # update the zenith selection and background probability
         self._ev = self.exp[exp_mask]
 
-        # update rightascension information for scrambled events
+        # update right ascension information for scrambled events
         if scramble and not self.fix:
             if not self.timescramble:
                 self._ev["ra"] = self.random.uniform(0., 2. * np.pi,
@@ -1012,7 +1027,7 @@ class PointSourceLLH(object):
 
         Other parameters
         ----------------
-        mu : iterator
+        mu_gen : iterator
             Iterator yielding injected events. Stored at ps_injector.
         n_iter : int
             Number of iterations to perform.
