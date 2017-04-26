@@ -415,7 +415,7 @@ class PointSourceLLH(object):
         Parameters
         ----------
         src_ra src_dec : float, array_like
-            Rightascension and Declination of source(s)
+            Right ascension and declination of source(s)
 
         Other parameters
         ----------------
@@ -2472,10 +2472,14 @@ class StackingPointSourceLLH(PointSourceLLH):
         self._ev = np.copy(self.exp)
 
 
-        # update rightascension information for scrambled events
+        # update right ascension information for scrambled events
         if scramble and not self.fix:
-            self._ev["ra"] = self.random.uniform(0., 2. * np.pi,
-                                                 size=len(self._ev))
+            if not self.timescramble:
+                self._ev["ra"] = self.random.uniform(0., 2. * np.pi,
+                                                     size=len(self._ev))
+            else:
+                random_times = self.timegen.sample(len(self._ev)).next()
+                self._ev["ra"] = utils.rotate_2d(self._ev["Azimuth"], random_times)
 
         # inject events
         if inject is not None:
