@@ -319,7 +319,7 @@ class FlareStackingInjector(StackingPointSourceInjector): # (or base it on Flare
 
         return
 
-    def fill(self, src_dec, mc, livetime):
+    def fill(self, src_dec, mc, livetime, *args, **kwargs):
         r"""Fill the Injector with MonteCarlo events selecting events around
         the source position(s).
 
@@ -341,7 +341,7 @@ class FlareStackingInjector(StackingPointSourceInjector): # (or base it on Flare
         """
         # most tasks are same as with the StackingPointSourceInjector
         # (at least the code looks totally appropriate)
-        super(FlareStackingInjector, self).fill(src_dec, mc, livetime)
+        super(FlareStackingInjector, self).fill(src_dec, mc, livetime, *args, **kwargs):
         
         
         # Check whether we can generate times for all the mc samples that are given

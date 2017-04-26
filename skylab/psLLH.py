@@ -78,7 +78,7 @@ logger.addHandler(logging.StreamHandler())
 _aval = 1.e-3
 _b_eps = 0.9
 _beta_val = 0.5
-_delta_ang = np.radians(10.)
+_delta_ang = np.radians(15.)
 _eps = 5.e-3
 _ev = None
 _ev_S = np.nan
@@ -337,6 +337,7 @@ class PointSourceLLH(object):
         # set llh model
         self.llh_model = kwargs.pop("llh_model", ps_model.ClassicLLH()), mc
         # Now we can also cache self._current_par_scaling
+        # (since it's informed by parameters from self.llh_model)
         self._current_par_scaling = self.par_scaling
 
         # set all other parameters
@@ -1126,17 +1127,17 @@ class PointSourceLLH(object):
         aval = -1. + _aval
         alpha = nsources * x
         
-        """
+
         #------------------------ logLambda==-inf diagnostics ------------------
-        print("nsources", nsources)
-        print("N", N)
-        print("sum, any(isinf()) ...")
-        print("w: ",w.sum(), np.any(np.isinf(w)))
-        print("grad_w", grad_w.sum(), np.any(np.isinf(grad_w)))
-        print("SoB", SoB.sum(), np.any(np.isinf(SoB)))
-        print("x", x.sum(), np.any(np.isinf(x)))
+        logger.trace("nsources", nsources)
+        logger.trace("N", N)
+        logger.trace("sum, any(isinf()) ...")
+        logger.trace("w: ",w.sum(), np.any(np.isinf(w)))
+        logger.trace("grad_w", grad_w.sum(), np.any(np.isinf(grad_w)))
+        logger.trace("SoB", SoB.sum(), np.any(np.isinf(SoB)))
+        logger.trace("x", x.sum(), np.any(np.isinf(x)))
         #------------------------ logLambda==-inf diagnostics ------------------
-        """
+
 
         # select events close to divergence
         xmask = alpha > aval
@@ -1230,7 +1231,7 @@ class PointSourceLLH(object):
             return -fun, -grad
             
         def _llh_scaled(x, *args):
-            """Wrapper around _llh. Wrapper around _llh. Accepts "x" with parameter scaling, passes it
+            """Wrapper around _llh. Accepts "x" with parameter scaling, passes it
             on without."""
             # undo scaling to x = ['nsources', 'thres', 'gamma']
             # which is e.g. [1., 1e7, 1.]
@@ -1243,7 +1244,7 @@ class PointSourceLLH(object):
             # before they are returned
             minus_grad = minus_grad / self._current_par_scaling
             # OBS: That means, every parameter needs a gradient!
-            # E.h. if `delay` is reintroduced as a free parameter
+            # E.g. if `delay` or `thres` is reintroduced as a free parameter
             
             return minus_fun, minus_grad
             
@@ -1281,11 +1282,12 @@ class PointSourceLLH(object):
         pars = pars * self._current_par_scaling
         bounds = self.par_bounds * np.atleast_2d(self._current_par_scaling).T
         
-        """
-        # L-BFGS-B minimization: not (yet) used in timedep
+
+        # L-BFGS-B minimization: can use it in flarestacking without delay,thres parameters
+        # (but not in timedep - that LLH is not steadily derivable!)
         # minimizer setup
         xmin, fmin, min_dict = scipy.optimize.fmin_l_bfgs_b(
-                                _llh, pars,
+                                _llh_scaled, pars,
                                 bounds=self.par_bounds,
                                 **kwargs)
 
@@ -1304,40 +1306,50 @@ class PointSourceLLH(object):
                                     **kwargs)
 
             i += 1
-        """
+
         logger.trace("fit_source: running minimizer")
-        # Try using Nelder-Mead/Simplex with hobo bounds
+        # Try using Nelder-Mead/Simplex with hobo bounds - not necessary (yet (!)) for flarestacking
+        # (see comment for L-BFGS-B above)
+        """
         xmin, fmin, min_dict = utils.bounded_simplex(_llh_nograd, pars, bounds=bounds)
         #------- minimizer diagnostics -----------------------------------------
-        #print("~~ Minimizer diagnostics ~~")
-        #print(min_dict)
-        #print("self.params ",self.params)
-        #print("xmin ",xmin)
+        logger.trace("~~ Minimizer diagnostics ~~")
+        logger.trace(min_dict)
+        logger.trace("self.params ",self.params)
+        logger.trace("xmin ",xmin)
         #------- minimizer diagnostics -----------------------------------------
-        
+        """
+
         logger.trace("fit_source: undoing parameter scaling")
         # undo the evil scaling we applied before!
         xmin = xmin / self._current_par_scaling
 
-        #------- minimizer diagnostics -----------------------------------------
-        #print(xmin)
-        #------- minimizer diagnostics -----------------------------------------
+
         
+		
+        # if the nsources parameter went outside of the bounds:
+        # (only a concern for `bounded_simplex` (!))
+        """
+        # went outside of lower bound:
         if xmin[0] < self.par_bounds[0][0]:
+            # if that bound is not == 0 (what did I think here (?))
             if self.par_bounds[0][0] < 0 or self.par_bounds[0][0] > 0:
                 logger.error("N_s fit out of bounds "
                              "({0:.2e}), set to boundary".format(xmin[0]))
             fmin = _llh(np.append(self.par_bounds[0][0], xmin[1:]))[0]
             xmin[0] = self.par_bounds[0][0]
-
+        # went outside of upper bound:
         elif xmin[0] > self.par_bounds[0][1]:
+            # if that bound is not == 0 (what did I think here (?))
             if self.par_bounds[0][1] < 0 or self.par_bounds[0][1] > 0:
                 logger.error("N_s fit out of bounds "
                              "({0:.2e}), set to boundary".format(xmin[0]))
             fmin = _llh(np.append(self.par_bounds[0][1], xmin[1:]))[0]
             xmin[0] = self.par_bounds[0][1]
+        """
          
         logger.trace("fit_source: checking fit results")
+
         # why do we set fmin=0, nfit=0 IF the bounds include nsources=0 (?)
         if fmin > 0 and (self.par_bounds[0][0] <= 0
                          and self.par_bounds[0][1] >= 0):
@@ -1681,13 +1693,19 @@ class PointSourceLLH(object):
                       "inject increasing number of events "
                       "starting with {0:d} events...".format(n_inj + 1))
 
-                n_inj = int(np.mean(trials["n_inj"])) if len(trials) > 0 else 0
+                # Original method to estimate starting n_inj for do_estimation
+                # Still present in coenders/master branch
+                # -> overrides method above ("first never used")
+                # But removed in mhuber89/stacking branch
+                # -> uses the newer method (merged from multiprocessing branch).
+                #n_inj = int(np.mean(trials["n_inj"])) if len(trials) > 0 else 0
                 while True:
                     n_inj, sample = inj.sample(src_ra, n_inj + 1, poisson=False).next()
 
                     TS_i, xmin_i = self.fit_source(src_ra, src_dec,
                                                    inject=sample,
-                                                   scramble=True)
+                                                   scramble=True,
+                                                   **kwargs)
 
                     trial_i = np.empty((1, ), dtype=trials.dtype)
                     trial_i["n_inj"] = n_inj
@@ -1700,7 +1718,6 @@ class PointSourceLLH(object):
                     mTS = np.bincount(trials["n_inj"], weights=trials["TS"])
                     mW = np.bincount(trials["n_inj"])
                     mTS[mW > 0] /= mW[mW > 0]
-
                     resid = mTS - TSval
 
                     if (float(np.count_nonzero(resid > 0)) / len(resid) > beta
@@ -1795,6 +1812,8 @@ class PointSourceLLH(object):
         n_iter = int(kwargs.pop("n_iter", _n_iter))
         eps = kwargs.pop("eps", _eps)
         fit = kwargs.pop("fit", None)
+        w_theoMC = kwargs.pop('w_theoMC', np.ones_like(np.atleast_1d(src_dec)))
+        kwargs.setdefault('w_theo', np.ones_like(np.atleast_1d(src_dec)))
 
         if fit is not None and not hasattr(fit, "isf"):
             raise AttributeError("fit must have attribute 'isf(alpha)'!")
@@ -1808,18 +1827,20 @@ class PointSourceLLH(object):
                              " same length!")
 
         # setup source injector
-        inj.fill(src_dec, mc, self.livetime)
+        inj.fill(src_dec, mc, self.livetime, w_theo=w_theoMC)
 
-        print("Estimate Sensitivity for declination {0:5.1f} deg".format(
-                np.degrees(src_dec)))
+        print('flux',inj.mu2flux(9.))
+
+        print("Estimate Sensitivity for {0:5d} sources from declination {1:5.1f}deg to {2:5.1f}deg".format(
+                len(np.atleast_1d(src_dec)),min(np.degrees(src_dec)),max(np.degrees(src_dec))))
 
         # result list
         TS = list()
         mu_flux = list()
         flux = list()
-        trials = np.empty((0, ), dtype=[("n_inj", np.int), ("TS", np.float)]
+        trials = kwargs.pop('trials', np.empty((0, ), dtype=[("n_inj", np.int), ("TS", np.float)]
                                        + [(par, np.float)
-                                          for par in self.params])
+                                          for par in self.params]))
 
         for i, (TSval_i, alpha_i, beta_i) in enumerate(zip(TSval, alpha, beta)):
 
