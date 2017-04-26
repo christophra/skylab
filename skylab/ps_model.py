@@ -666,7 +666,7 @@ class WeightLLH(ClassicLLH):
                 ratio[:,:,j] = r
                 w[:,:,j] = w_i
                 
-
+                    
                 if (gamma > 1.95) and (gamma < 2.05):
                     import matplotlib.pylab as plt 
                     from matplotlib.colors import LogNorm
@@ -695,6 +695,7 @@ class WeightLLH(ClassicLLH):
                     plt.savefig('/Users/mhuber/test_hist.pdf')
                     plt.close()
                     break
+
         '''
         binmids = [(wSb_i[1:] + wSb_i[:-1]) / 2. for wSb_i in wSb]
         #print('mids:',binmids,np.array(binmids).shape)
