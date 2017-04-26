@@ -2496,8 +2496,7 @@ class StackingPointSourceLLH(PointSourceLLH):
         elif self.mode in ["band", "box"]:
             # get events that are within at least one declination band
             # --> create sparse matrix and remove events which are in no src dec band
-            exp_mask = sps.csr_matrix(((self._ev["sinDec"] > np.sin(min_dec)[:, np.newaxis])&(self._ev["sinDec"] < np.sin(max_dec)[:, np.newaxis]))
-                    |(self._ev['sigma']>(np.ones_like(src_dec)*np.radians(3.))[:,np.newaxis]))
+            exp_mask = sps.csr_matrix(((self._ev["sinDec"] > np.sin(min_dec)[:, np.newaxis])&(self._ev["sinDec"] < np.sin(max_dec)[:, np.newaxis])))
 
             mask = exp_mask.getnnz(axis=0)>0
             exp_mask = exp_mask.transpose()[mask].transpose()
@@ -2545,7 +2544,7 @@ class StackingPointSourceLLH(PointSourceLLH):
                              - np.pi)
 
             #right ascension mask
-            mask_ra = (mask_ra < (dPhi[indices]/2.))|(self._ev['sigma'][ev_ind] > np.radians(3.))
+            mask_ra = (mask_ra < (dPhi[indices]/2.))
             #box mask
             exp_mask.data *= mask_ra
             exp_mask = sps.csr_matrix(exp_mask.toarray())
