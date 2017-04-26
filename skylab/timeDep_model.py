@@ -166,6 +166,7 @@ class LightcurveLLH(PowerLawLLH):
         S_temporal = np.zeros(shape=(len(src_lc), ev.size)) # has shape: sources x events
         for i_source in range(len(src_lc)):
             S_temporal[i_source] = src_lc[i_source].tPDFvals(ev["time"],**params)
+        return S_temporal
 
     def signal(self, src_ra, src_dec, src_lc, ev, **params):
         r"""Space-time likelihood for events given source position and lightcurve
