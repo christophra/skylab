@@ -2,6 +2,13 @@
 
 from __future__ import print_function
 
+'''
+from icecube.photospline.glam import glam
+#from icecube.photospline import spglam as glam
+from icecube.photospline import splinefitstable
+from icecube.photospline.glam.glam import grideval
+from icecube.photospline.glam.bspline import bspline
+'''
 """
 This file is part of SkyLab
 
@@ -28,6 +35,7 @@ import logging
 import numpy as np
 import scipy.interpolate
 from scipy.stats import norm
+import scipy.sparse as sps
 
 # local package imports
 from . import set_pars
@@ -507,11 +515,9 @@ class WeightLLH(ClassicLLH):
 
         self._setup(exp)
 
-        # calculate splines for all values of splines
+        # calclate splines for all values of splines
         par_grid = dict()
         for par, val in self.params.iteritems():
-            if par!="gamma": # need this since it's hardcoded in weight() - better solution (?)
-                continue
             # create grid of all values that could come up due to boundaries
             # use one more grid point below and above for gradient calculation
             low, high = val[1]
@@ -666,7 +672,7 @@ class WeightLLH(ClassicLLH):
                 ratio[:,:,j] = r
                 w[:,:,j] = w_i
                 
-                    
+
                 if (gamma > 1.95) and (gamma < 2.05):
                     import matplotlib.pylab as plt 
                     from matplotlib.colors import LogNorm
@@ -695,7 +701,6 @@ class WeightLLH(ClassicLLH):
                     plt.savefig('/Users/mhuber/test_hist.pdf')
                     plt.close()
                     break
-
         '''
         binmids = [(wSb_i[1:] + wSb_i[:-1]) / 2. for wSb_i in wSb]
         #print('mids:',binmids,np.array(binmids).shape)
@@ -736,11 +741,6 @@ class WeightLLH(ClassicLLH):
 
         return
 
-    
-    
-    
-    
-    
     def _ratio_spline(self, mc, **params):
         r"""Create the ratio of signal over background probabilities. With same
         binning, the bin hypervolume cancels out, ensuring correct
@@ -877,6 +877,8 @@ class WeightLLH(ClassicLLH):
 
       
         return np.exp(val)
+
+
 
     def weight(self, ev, **params):
         r"""Evaluate spline for given parameters.
@@ -1057,6 +1059,7 @@ class PowerLawLLH(WeightLLH):
         grad[mask] = 0.
 
         return val, dict(gamma=grad)
+
 
 
 class EnergyLLH(PowerLawLLH):
