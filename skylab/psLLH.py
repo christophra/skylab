@@ -351,6 +351,7 @@ class PointSourceLLH(object):
             else:
                 random_times = self.timegen.sample(len(self.exp)).next()
                 self.exp["ra"] = utils.rotate_2d(self.exp["Azimuth"], random_times)
+                self.exp["time"] = random_times
         else:
             print("\t####################################\n"
                   "\t# Working on >> UNBLINDED << data! #\n"
@@ -470,6 +471,7 @@ class PointSourceLLH(object):
             else:
                 random_times = self.timegen.sample(len(self._ev)).next()
                 self._ev["ra"] = utils.rotate_2d(self._ev["Azimuth"], random_times)
+                self._ev["time"] = random_times
 
         # selection in rightascension
         if self.mode == "box":
@@ -2503,6 +2505,7 @@ class StackingPointSourceLLH(PointSourceLLH):
             else:
                 random_times = self.timegen.sample(len(self._ev)).next()
                 self._ev["ra"] = utils.rotate_2d(self._ev["Azimuth"], random_times)
+                self._ev["time"] = random_times
 
         # inject events
         if inject is not None:
