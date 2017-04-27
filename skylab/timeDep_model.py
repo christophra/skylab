@@ -217,7 +217,7 @@ class LightcurveLLH(PowerLawLLH):
             if not isinstance(src_lc, list):
                 src_lc = [src_lc for d in src_ra]
                 
-            S_spatial = super(LightcurveLLH, self).fast_signal(src_ra, src_dec, ev)
+            S_spatial = super(LightcurveLLH, self).fast_signal(src_ra, src_dec, ev, ind)
             S_temporal = self._signal_time(src_lc, np.take(ev,ind), **params)
             
             return S_spatial * S_temporal
