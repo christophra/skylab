@@ -210,17 +210,17 @@ class LightcurveLLH(PowerLawLLH):
         
         return S_spatial*S_temporal
         
-        def fast_signal(self, src_ra, src_dec, src_lc, ev, ind, **params):
-            r"""Space-time LLH corresponding to ClassicLLH.fast_signal.
-            """
+    def fast_signal(self, src_ra, src_dec, src_lc, ev, ind, **params):
+        r"""Space-time LLH corresponding to ClassicLLH.fast_signal.
+        """
+        
+        if not isinstance(src_lc, list):
+            src_lc = [src_lc for d in src_ra]
             
-            if not isinstance(src_lc, list):
-                src_lc = [src_lc for d in src_ra]
-                
-            S_spatial = super(LightcurveLLH, self).fast_signal(src_ra, src_dec, ev, ind)
-            S_temporal = self._signal_time(src_lc, np.take(ev,ind), **params)
-            
-            return S_spatial * S_temporal
+        S_spatial = super(LightcurveLLH, self).fast_signal(src_ra, src_dec, ev, ind)
+        S_temporal = self._signal_time(src_lc, np.take(ev,ind), **params)
+        
+        return S_spatial * S_temporal
             
     
         
