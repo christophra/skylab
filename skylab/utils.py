@@ -491,8 +491,8 @@ def rotate_2d(angles_in, mjd):
     _sidereal_offset = 2.54199002505 # RA = offset + 2pi * (MJD/sidereal_length)%1  - azimuth
     sidereal_day_residuals = ((mjd/_sidereal_length)%1)
     angles_out = _sidereal_offset + 2 * np.pi * sidereal_day_residuals - angles_in
+    angles_out = np.mod(angles_out, 2*np.pi)
     return angles_out
-
 
 class times(object):
     r"""A class to make scrambled times which respect the detector uptime via a
