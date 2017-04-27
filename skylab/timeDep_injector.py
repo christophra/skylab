@@ -375,7 +375,6 @@ class FlareStackingInjector(StackingPointSourceInjector): # (or base it on Flare
             Use poisson fluctuations, otherwise sample exactly *mean_mu*
 
         """
-        src_ra = src_ra
         # generate event numbers using poissonian events
         while True:
 

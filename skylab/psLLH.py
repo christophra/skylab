@@ -108,6 +108,7 @@ _pVal = lambda TS, sinDec: TS
 _rho_max = 0.95
 _src_dec = np.nan
 _src_ra = np.nan
+_src_lc = None
 _seed = None
 _sindec_bins = np.linspace(-1., 1., 100. + 1)
 _thresh_S = 0.
@@ -168,8 +169,8 @@ class PointSourceLLH(object):
         Analyse scrambled trials on declination band `src_dec`.
     llh(**fit_pars)
         Calculate Likelihood.
-    fit_source(src_ra, src_dec, **kwargs)
-        Minimize the likelihood at the position `src_ra`, `src_dec`.
+    fit_source(src_ra, src_dec, src_lc, **kwargs)
+        Minimize the likelihood at the position `src_ra`, `src_dec` and time pdf `src_lc`.
     reset()
         Delete all cached values.
     sensitivity(src_dec, alpha, beta, inj, **kwargs)
@@ -409,13 +410,15 @@ class PointSourceLLH(object):
 
     # INTERNAL METHODS
 
-    def _select_events(self, src_ra, src_dec, **kwargs):
+    def _select_events(self, src_ra, src_dec, src_lc, **kwargs):
         r"""Select events around source location(s) used in llh calculation.
 
         Parameters
         ----------
         src_ra src_dec : float, array_like
             Right ascension and declination of source(s)
+        src_lc : (list of) TimePDF(s)
+            Time PDF / lightcurve of source(s)
 
         Other parameters
         ----------------
@@ -483,6 +486,7 @@ class PointSourceLLH(object):
 
         self._src_ra = src_ra
         self._src_dec = src_dec
+        self._src_lc = src_lc
 
         if inject is not None:
             self._ev = np.append(self._ev,
@@ -493,7 +497,7 @@ class PointSourceLLH(object):
             self._N += len(inject)
 
         # calculate signal term
-        self._ev_S = self.llh_model.signal(src_ra, src_dec, self._ev)
+        self._ev_S = self.llh_model.signal(src_ra, src_dec, src_lc, self._ev)
 
         # do not calculate values with signal below threshold
         ev_mask = self._ev_S > self.thresh_S
@@ -1009,7 +1013,7 @@ class PointSourceLLH(object):
 
         return
 
-    def do_trials(self, src_ra, src_dec, **kwargs):
+    def do_trials(self, src_ra, src_dec, src_lc, **kwargs):
         r"""Calculation of scrambled trials.
 
         Perform trials on scrambled event maps to estimate the event
@@ -1019,6 +1023,8 @@ class PointSourceLLH(object):
         ----------
         src_dec : float
             Declination of the interesting point for scrambling.
+        src_lc  : (list of) TimePDF(s)
+            TimePDF to be evaluated for the scrambled data.
 
         Returns
         -------
@@ -1056,7 +1062,7 @@ class PointSourceLLH(object):
 
         if self.ncpu > 1 and len(samples) > self.ncpu:
             logger.trace("do_trials: assembling function call arguments for MP")
-            args = [(self, src_ra, src_dec, sam, True,
+            args = [(self, src_ra, src_dec, src_lc, sam, True,
                      dict(kwargs.items()
                           + [("seed", self.random.randint(2**32))]))
                     for sam in samples]
@@ -1074,7 +1080,7 @@ class PointSourceLLH(object):
 
         else:
             logger.trace("do_trials: just calling fit_source in single thread")
-            result = [self.fit_source(src_ra, src_dec, inject=sam,
+            result = [self.fit_source(src_ra, src_dec, src_lc, inject=sam,
                                       scramble=True, **kwargs)
                       for sam in samples]
 
@@ -1185,13 +1191,15 @@ class PointSourceLLH(object):
 
         return LogLambda, grad
 
-    def fit_source(self, src_ra, src_dec, **kwargs):
+    def fit_source(self, src_ra, src_dec, src_lc, **kwargs):
         """Minimize the negative log-Likelihood at source position(s).
 
         Parameters
         ----------
-        src_ra src_dec : array_like
+        src_ra, src_dec : array_like
             Source position(s).
+        src_lc : (list of) TimePDF(s)
+            Source lightcurve(s).
 
         Returns
         -------
@@ -1263,7 +1271,7 @@ class PointSourceLLH(object):
 
         logger.trace("fit_source: selecting events")
         # Set all weights once for this src location, if not already cached
-        self._select_events(src_ra, src_dec, inject=inject, scramble=scramble)
+        self._select_events(src_ra, src_dec, src_lc, inject=inject, scramble=scramble)
 
         if self._N < 1:
             # No events selected
@@ -1374,13 +1382,15 @@ class PointSourceLLH(object):
         fmin *= -np.sign(xmin["nsources"])
 
         return fmin, xmin
-    def scan_ts(self, src_ra, src_dec, scan_nsources, scan_gamma, **kwargs):
+    def scan_ts(self, src_ra, src_dec, src_lc, scan_nsources, scan_gamma, **kwargs):
         """Scan test statistic.
 
         Parameters
         ----------
         src_ra src_dec : array_like
             Source position(s).
+        src_lc : (list of) TimePDF(s)
+            Source time PDF(s).
 
         Returns
         -------
@@ -1420,7 +1430,7 @@ class PointSourceLLH(object):
         kwargs.setdefault("pgtol", _pgtol)
 
         # Set all weights once for this src location, if not already cached
-        self._select_events(src_ra, src_dec, inject=inject, scramble=scramble)
+        self._select_events(src_ra, src_dec, src_lc, inject=inject, scramble=scramble)
 
         # get seeds
         pars = self.par_seeds
@@ -1443,7 +1453,9 @@ class PointSourceLLH(object):
         ----------
         src_ra src_dec : array_like
             Source position(s).
-
+        src_lc : (list of) TimePDF(s)
+            Source time PDF(s).
+            
         Returns
         -------
         fmin: array-like
@@ -1485,7 +1497,7 @@ class PointSourceLLH(object):
         kwargs.setdefault("pgtol", _pgtol)
 
         # Set all weights once for this src location, if not already cached
-        self._select_events(src_ra, src_dec, inject=inject, scramble=scramble)
+        self._select_events(src_ra, src_dec, src_lc, inject=inject, scramble=scramble)
 
         # get seeds
         pars = self.par_seeds
@@ -1505,7 +1517,7 @@ class PointSourceLLH(object):
         del ts_matrix
         return profile_matrix, profile_gamma
 
-    def fit_source_loc(self, src_ra, src_dec, size, seed, **kwargs):
+    def fit_source_loc(self, src_ra, src_dec, src_lc, size, seed, **kwargs):
         """Minimize the negative log-Likelihood around interesting position.
 
         Parameters
@@ -1545,7 +1557,7 @@ class PointSourceLLH(object):
 
             # check if new source selection has to be done
             if not (x[0] == self._src_ra and x[1] == self._src_dec):
-                self._select_events(x[0], x[1])
+                self._select_events(x[0], x[1], src_lc)
 
             # forget about source position
             x = x[2:]
@@ -1597,6 +1609,7 @@ class PointSourceLLH(object):
 
         self._src_ra = _src_ra
         self._src_dec = _src_dec
+        self._src_lc = _src_lc
 
         self._ev = _ev
         self._ev_S = _ev_S
@@ -1605,7 +1618,7 @@ class PointSourceLLH(object):
 
         return
 
-    def weighted_sensitivity(self, src_ra, src_dec, alpha, beta, inj, mc, **kwargs):
+    def weighted_sensitivity(self, src_ra, src_dec, src_lc, alpha, beta, inj, mc, **kwargs):
         """Calculate the point source sensitivity for a given source
         hypothesis using weights.
 
@@ -1619,6 +1632,8 @@ class PointSourceLLH(object):
             Source position(s)
         src_dec : float
             Source position(s)
+        src_lc : (list of) TimePDF(s)
+            Source time PDF(s)/lightcurve(s).
         alpha : array-like (m, )
             Error of first kind
         beta : array-like (m, )
@@ -1702,7 +1717,7 @@ class PointSourceLLH(object):
                 while True:
                     n_inj, sample = inj.sample(src_ra, n_inj + 1, poisson=False).next()
 
-                    TS_i, xmin_i = self.fit_source(src_ra, src_dec,
+                    TS_i, xmin_i = self.fit_source(src_ra, src_dec, src_lc,
                                                    inject=sample,
                                                    scramble=True,
                                                    **kwargs)
@@ -1731,8 +1746,9 @@ class PointSourceLLH(object):
 
                 # do trials around active region
                 trials = np.append(trials,
-                                   self.do_trials(src_ra, src_dec, n_iter=n_iter,
-                                                  mu=inj.sample(src_ra, mu_eff),
+                                   self.do_trials(src_ra, src_dec, src_lc,
+                                                  n_iter=n_iter,
+                                                  mu_gen=inj.sample(src_ra, mu_eff),
                                                   **kwargs))
 
 
@@ -1795,7 +1811,8 @@ class PointSourceLLH(object):
 
                 # do trials with best estimate
                 trials = np.append(trials, self.do_trials(
-                    src_ra, src_dec, mu=inj.sample(src_ra, mu_eff), n_iter=n_iter, **kwargs))
+                    src_ra, src_dec, src_lc,
+                    mu_gen=inj.sample(src_ra, mu_eff), n_iter=n_iter, **kwargs))
 
                 sys.stdout.flush()
 
@@ -1852,7 +1869,7 @@ class PointSourceLLH(object):
                           "TS value for alpha = {0:7.2%}".format(alpha_i))
 
                     trials = np.append(trials,
-                                       self.do_trials(src_ra, src_dec,
+                                       self.do_trials(src_ra, src_dec, src_lc,
                                                       n_iter=n_bckg,
                                                       **kwargs))
 
@@ -2134,13 +2151,15 @@ class MultiPointSourceLLH(PointSourceLLH):
 
         return out_str
 
-    def _select_events(self, src_ra, src_dec, **kwargs):
+    def _select_events(self, src_ra, src_dec, src_lc, **kwargs):
         r"""Select events around source location(s) used in llh calculation.
 
         Parameters
         ----------
         src_ra src_dec : float, array_like
-            Rightascension and Declination of source(s)
+            Right ascension and declination of source(s)
+        src_lc : (list of) TimePDF(s)
+            TimePDF / lightcurve of source(s)
 
         Other parameters
         ----------------
@@ -2156,6 +2175,7 @@ class MultiPointSourceLLH(PointSourceLLH):
         # cache declination for weighting calculation
         self._src_ra = src_ra
         self._src_dec = src_dec
+        self._src_lc = src_lc
 
         inject = kwargs.pop("inject", None)
 
@@ -2167,7 +2187,7 @@ class MultiPointSourceLLH(PointSourceLLH):
             else:
                 inj_i = inject
 
-            sam._select_events(src_ra, src_dec, inject=inj_i, **kwargs)
+            sam._select_events(src_ra, src_dec, src_lc, inject=inj_i, **kwargs)
 
         self._n = sum([sam._n for sam in self._sams.itervalues()])
         self._N = sum([sam._N for sam in self._sams.itervalues()])
@@ -2385,6 +2405,7 @@ class MultiPointSourceLLH(PointSourceLLH):
 
         self._src_ra = _src_ra
         self._src_dec = _src_dec
+        self._src_lc = _src_lc
 
         for obj in self._sams.itervalues():
             obj.reset()
@@ -2421,13 +2442,15 @@ class StackingPointSourceLLH(PointSourceLLH):
 
 
     # INTERNAL METHODS
-    def _select_events(self, src_ra, src_dec, **kwargs):
+    def _select_events(self, src_ra, src_dec, src_lc, **kwargs):
         r"""Select events around source locations used in llh calculation.
 
         Parameters
         ----------
         src_ra src_dec : float, array_like
-            Rightascension and Declination of source(s)
+            Right ascension and declination of source(s)
+        src_lc : (list of) TimePDF(s)
+            Time PDF / lightcurve of source(s)
 
         Other parameters
         ----------------
@@ -2568,16 +2591,17 @@ class StackingPointSourceLLH(PointSourceLLH):
 
         self._src_ra = src_ra
         self._src_dec = src_dec
+        self._src_lc = src_lc
 
 
         # calculate signal term
         if self.mode == 'all':
-            #do the estimation for in steps to save memory if the catalog is too large (slighlty more time consuming!)
+            #do the estimation for in steps to save memory if the catalog is too large (slightly more time consuming!)
             step = 500
             if N_src > step:
                 self._ev_S = sps.csr_matrix((0,len(self._ev)),dtype=np.float32)
                 for num in np.arange(N_src,step = step,dtype=int):
-                    _ev_S = sps.csr_matrix(self.llh_model.signal(src_ra[num:num+step], src_dec[num:num+step], self._ev), dtype=np.float32)
+                    _ev_S = sps.csr_matrix(self.llh_model.signal(src_ra[num:num+step], src_dec[num:num+step], src_lc[num:num+step], self._ev), dtype=np.float32)
                     #Eliminate events below a signal threshold
                     mask = _ev_S.data > self._thresh_S
                     _ev_S.data[~mask] = 0.
@@ -2586,13 +2610,14 @@ class StackingPointSourceLLH(PointSourceLLH):
                     self._ev_S = csr_vappend(self._ev_S,_ev_S)
 
             else:
-                self._ev_S = sps.csr_matrix(self.llh_model.signal(src_ra, src_dec, self._ev),dtype=np.float32)
+                self._ev_S = sps.csr_matrix(self.llh_model.signal(src_ra, src_dec, src_lc, self._ev),dtype=np.float32)
 
 
         elif self.mode in ['band', 'box']:
             ra = src_ra[indices]
             dec = src_dec[indices]
-            self._ev_S = sps.csr_matrix((self.llh_model.fast_signal(ra, dec, self._ev, ev_ind), ev_ind, indptr),dtype=np.float32)
+            lc = [src_lc[i] for i in indices]
+            self._ev_S = sps.csr_matrix((self.llh_model.fast_signal(ra, dec, lc, self._ev, ev_ind), ev_ind, indptr),dtype=np.float32)
 
         #Eliminate events below a signal threshold
         mask = self._ev_S.data > self._thresh_S
@@ -2722,7 +2747,7 @@ class StackingPointSourceLLH(PointSourceLLH):
         return LogLambda, grad
 
     
-    def weighted_sensitivity(self, src_ra, src_dec, alpha, beta, inj, mc, **kwargs):
+    def weighted_sensitivity(self, src_ra, src_dec, src_lc, alpha, beta, inj, mc, **kwargs):
         """Calculate the point source sensitivity for a given source
         hypothesis using weights.
 
@@ -2736,6 +2761,8 @@ class StackingPointSourceLLH(PointSourceLLH):
             Source position(s)
         src_dec : float
             Source position(s)
+        src_lc : (list of) TimePDF(s)
+            Source lightcurve(s)
         alpha : array-like (m, )
             Error of first kind
         beta : array-like (m, )
@@ -2830,11 +2857,11 @@ class StackingPointSourceLLH(PointSourceLLH):
 
             kwargs.setdefault('TSval',TSval)
             kwargs.setdefault('trials',trials)
-            result = super(StackingPointSourceLLH, self).weighted_sensitivity(src_ra, src_dec, alpha, beta, inj, mc, **kwargs)
+            result = super(StackingPointSourceLLH, self).weighted_sensitivity(src_ra, src_dec, src_lc, alpha, beta, inj, mc, **kwargs)
 
 
         else:
-            result = super(StackingPointSourceLLH, self).weighted_sensitivity(src_ra, src_dec, alpha, beta, inj, mc, **kwargs)
+            result = super(StackingPointSourceLLH, self).weighted_sensitivity(src_ra, src_dec, src_lc, alpha, beta, inj, mc, **kwargs)
 
 
 
@@ -2958,13 +2985,15 @@ class StackingMultiPointSourceLLH(MultiPointSourceLLH):
 
         return logLambda, logLambda_grad
 
-    def fit_source(self, src_ra, src_dec, **kwargs):
+    def fit_source(self, src_ra, src_dec, src_lc, **kwargs):
         """Minimize the negative log-Likelihood at source positions.
 
         Parameters
         ----------
         src_ra src_dec : array_like
             Source position(s).
+        src_lc : (list of) TimePDF(s)
+            Source lightcurve(s)
 
         Returns
         -------
@@ -3004,7 +3033,7 @@ class StackingMultiPointSourceLLH(MultiPointSourceLLH):
         dx2 = np.mean(np.diff(x2))
 
         # Select events here already
-        self._select_events(src_ra, src_dec, inject=inject, scramble=scramble, w_theo=self._w_theo)
+        self._select_events(src_ra, src_dec, src_lc, inject=inject, scramble=scramble, w_theo=self._w_theo)
         N = 1
         start = time.clock()
 
@@ -3026,7 +3055,7 @@ class StackingMultiPointSourceLLH(MultiPointSourceLLH):
 
         
         self.par_seeds = np.array([x1_min, x2_min])
-        fmin,xmin = super(StackingMultiPointSourceLLH, self).fit_source(src_ra, src_dec, **kwargs)
+        fmin,xmin = super(StackingMultiPointSourceLLH, self).fit_source(src_ra, src_dec, src_lc, **kwargs)
         stop = time.clock()
         mins, secs = divmod(stop-start,60)
         hours,mins = divmod(mins,60)
@@ -3142,8 +3171,8 @@ class StackingMultiPointSourceLLH(MultiPointSourceLLH):
 
 
 def fs(args):
-    llh, ra, dec, inject, scramble, kwargs = args
+    llh, ra, dec, lc, inject, scramble, kwargs = args
     if scramble:
         llh.seed = kwargs.pop("seed")
 
-    return llh.fit_source(ra, dec, inject=inject, scramble=scramble, **kwargs)
+    return llh.fit_source(ra, dec, lc, inject=inject, scramble=scramble, **kwargs)
