@@ -1049,7 +1049,7 @@ class PointSourceLLH(object):
 
         """
         logger.trace("do_trials: getting kwargs")
-        mu_gen = kwargs.pop("mu", repeat((0, None)))
+        mu_gen = kwargs.pop("mu_gen", repeat((0, None)))
 
         # values for iteration procedure
         n_iter = kwargs.pop("n_iter", _n_trials)
