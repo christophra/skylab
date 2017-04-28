@@ -140,9 +140,10 @@ class LightcurveLLH(PowerLawLLH):
         
     def background(self, ev):
         r"""Return spatial background pdf, evaluated on structured array `ev`."""
-        #flatTimePDF=1./(self.timePDF.tend - self.timePDF.tstart) # included in _time_weight (!)
+        #flatTimePDF = 1./(self.timePDF.tend - self.timePDF.tstart)
+        flatTimePDF = np.full(ev.size, 1./self.livetime) # time PDFs (S,B) are in (1/day)
         #return self._background_vect(ev["Azimuth"spatial ],ev["sinDec"],ev["sinDec"]) # don't use local coords (!)
-        return super(LightcurveLLH, self).background(ev)
+        return super(LightcurveLLH, self).background(ev)*flatTimePDF
     
     def _signal_time(self, src_lc, ev, **params):
         r"""Signal time likelihood for a given list of lightcurves and event data.
@@ -167,6 +168,8 @@ class LightcurveLLH(PowerLawLLH):
         for i_source in range(len(src_lc)):
             S_temporal[i_source] = src_lc[i_source].tPDFvals(ev["time"],**params)
         return S_temporal
+        
+        
 
     def signal(self, src_ra, src_dec, src_lc, ev, **params):
         r"""Space-time likelihood for events given source position and lightcurve
@@ -209,16 +212,36 @@ class LightcurveLLH(PowerLawLLH):
         S_temporal = self._signal_time(src_lc, ev, **params)
         
         return S_spatial*S_temporal
+    
+    def _fast_signal_time(self, src_lc, ev, ind, src_ind, **params):
+        r"""Compute time LLH for events ev[ind] belonging to sources src_ind with PDFs src_lc.
+        Assumes that src_lc, ev, ind and src_ind are sorted together by src_ind.
+        """
+        assert(len(src_lc)==ind.size)
+        t = np.take(ev['time'],ind)
+        S = np.zeros_like(t)
+        n_events_per_source = np.argwhere(np.diff(src_ind)==1).T[0]+1
+        n_events_per_source = np.append(0,n_events_per_source)
+        n_events_per_source = np.append(n_events_per_source, ind.size)
+        for i_src in range(n_events_per_source.size-1):
+            i_array_low = n_events_per_source[i_src]
+            i_array_high = n_events_per_source[i_src+1]
+            lc = src_lc[i_array_low]
+            t_i = t[i_array_low:i_array_high]
+            S[i_array_low:i_array_high] = lc.tPDFvals(t_i)
+        return S
         
-    def fast_signal(self, src_ra, src_dec, src_lc, ev, ind, **params):
+        
+    def fast_signal(self, src_ra, src_dec, src_lc, ev, ind, src_ind, **params):
         r"""Space-time LLH corresponding to ClassicLLH.fast_signal.
+        Contains extra positional arguments src_lc and src_ind.
         """
         
         if not isinstance(src_lc, list):
             src_lc = [src_lc for d in src_ra]
             
         S_spatial = super(LightcurveLLH, self).fast_signal(src_ra, src_dec, ev, ind)
-        S_temporal = self._signal_time(src_lc, np.take(ev,ind), **params)
+        S_temporal = self._fast_signal_time(src_lc, ev, ind, src_ind, **params)
         
         return S_spatial * S_temporal
             

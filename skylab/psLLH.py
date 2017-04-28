@@ -340,6 +340,9 @@ class PointSourceLLH(object):
         # Now we can also cache self._current_par_scaling
         # (since it's informed by parameters from self.llh_model)
         self._current_par_scaling = self.par_scaling
+        # And we can inform the LLH model about the livetime
+        # (used to compute background time PDF)
+        self.llh_model.livetime = self.livetime
 
         # set all other parameters
         set_pars(self, **kwargs)
@@ -2620,7 +2623,7 @@ class StackingPointSourceLLH(PointSourceLLH):
             ra = src_ra[indices]
             dec = src_dec[indices]
             lc = [src_lc[i] for i in indices]
-            self._ev_S = sps.csr_matrix((self.llh_model.fast_signal(ra, dec, lc, self._ev, ev_ind), ev_ind, indptr),dtype=np.float32)
+            self._ev_S = sps.csr_matrix((self.llh_model.fast_signal(ra, dec, lc, self._ev, ev_ind, indices), ev_ind, indptr),dtype=np.float32)
 
         #Eliminate events below a signal threshold
         mask = self._ev_S.data > self._thresh_S
