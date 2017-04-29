@@ -230,6 +230,7 @@ class FlareStackingInjector(StackingPointSourceInjector): # (or base it on Flare
 
         if not isinstance(threshold,list):
             threshold = list(threshold)
+        self.threshold = threshold
         
         # Store spectral index
         self.gamma = gamma
