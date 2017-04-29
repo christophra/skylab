@@ -1221,6 +1221,8 @@ class PointSourceLLH(object):
 
         inject
             Source injector
+        w_theo : float, array-like
+            Source weights for the likelihood.
 
         kwargs
             Parameters passed to the L-BFGS-B minimiser.
@@ -1273,6 +1275,9 @@ class PointSourceLLH(object):
         scramble = kwargs.pop("scramble", False)
         inject = kwargs.pop("inject", None)
         kwargs.setdefault("pgtol", _pgtol)
+        stacking = kwargs.pop('stacking', False)
+        # Optional theoretical weight from the catalog
+        self._w_theo = kwargs.pop('w_theo', np.ones_like(src_dec,dtype=float))
 
         logger.trace("fit_source: selecting events")
         # Set all weights once for this src location, if not already cached
@@ -1681,6 +1686,7 @@ class PointSourceLLH(object):
             alpha obsolete.
         eps : float
             Precision for breaking point.
+            
 
         """
 
@@ -2813,6 +2819,10 @@ class StackingPointSourceLLH(PointSourceLLH):
             Precision for breaking point.
         trials: structured array
             Including TS, n_inj ... of different trials
+        w_theoMC : float, array-like
+            Source weights for injection.
+        w_theo : float, array-like
+            Source weights for likelihood.
 
         """
 
