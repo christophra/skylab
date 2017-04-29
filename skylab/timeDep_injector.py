@@ -87,7 +87,7 @@ class FlareInjector(PointSourceInjector):
         sout = super(FlareInjector,self).__str__()
         # Add additional ones before last line of dashes
         sout_split = sout.split('\n')
-        sout_split.insert(-1,'\tLightcurve threshold : {0:2.2e} deg\n'.format(self.threshold))
+        sout_split.insert(-1,'\tLightcurve threshold : {0:2.2e} deg\n'.format(self.lightcurve_pdf.threshold))
         # Join into one string again
         sout = '\n'.join(sout_split)
         
