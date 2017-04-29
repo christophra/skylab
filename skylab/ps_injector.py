@@ -191,10 +191,10 @@ class PointSourceInjector(Injector):
         sout = ("\n{0:s}\n"+
                 67*"-"+"\n"+
                 "\tSpectral index     : {1:6.2f}\n"+
-                "\tSource declination : {2:5.1f} deg\n"
+                "\tSource declination : {2:s} deg\n"
                 "\tlog10 Energy range : {3:5.1f} to {4:5.1f}\n").format(
                          self.__repr__(),
-                         self.gamma, np.degrees(self.src_dec),
+                         self.gamma, str(np.degrees(self.src_dec)),
                          *self.e_range)
         sout += 67*"-"
 

@@ -277,7 +277,7 @@ class FlareStackingInjector(StackingPointSourceInjector): # (or base it on Flare
         sout_split = sout.split('\n')
         sout_split
         for th in self.threshold:
-            sout_split.insert(-1,'\tLightcurve threshold : {0:2.2e} deg\n'.format(th))
+            sout_split.insert(-1,'\tLightcurve threshold : {0:2.2e} deg'.format(th))
         # Join into one string again
         sout = '\n'.join(sout_split)
         return sout
