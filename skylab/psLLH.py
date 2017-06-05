@@ -1280,7 +1280,7 @@ class PointSourceLLH(object):
         self._w_theo = kwargs.pop('w_theo', np.ones_like(src_dec,dtype=float))
 
         logger.trace("fit_source: selecting events")
-        # Set all weights once for this src location, if not already cached
+        # Set all SoB weights once for this source, if not already cached
         self._select_events(src_ra, src_dec, src_lc, inject=inject, scramble=scramble)
 
         if self._N < 1:
@@ -1288,13 +1288,32 @@ class PointSourceLLH(object):
             return 0., dict([(par, par_s) if not par == "nsources" else (par, 0.)
                              for par, par_s in zip(self.params, self.par_seeds)])
 
+        # short scan of the llh space to get the seed values
+        # ASSUMING WE ONLY HAVE nsources AND gamma AS PARAMETERS (!)
+        logger.trace("fit_source: estimating seeds with gridscan")
+        grid_step = 1
+        x1 = np.arange(5,100,step=30,dtype=float)
+        dx1 = np.mean(np.diff(x1))
+        x2 = np.array([2., 3.])
+        dx2 = np.mean(np.diff(x2))
+        Z = np.reshape([[-self.llh(nsources=x_i, gamma=y_i)[0]
+                            for x_i in x1[::grid_step]]
+                            for y_i in x2[::grid_step]],
+                (len(x2[::grid_step]), len(x1[::grid_step])))
+        Z = np.ma.masked_array(Z) - np.amin(Z[np.isfinite(Z)])
+        Z.mask = ~np.isfinite(Z)
+        min_ind = np.unravel_index(Z.argmin(), Z.shape)
+        x1_min = x1[::grid_step][min_ind[1]]
+        x2_min = x2[::grid_step][min_ind[0]]
+        
         logger.trace("fit_source: getting seeds")
-        # get seeds - from kwargs to fit_source or (default) self.par_seeds
-        pars = self.par_seeds
+        # get seeds - from kwargs to fit_source, grid scan or (default) self.par_seeds
+        #pars = self.par_seeds
+        pars = np.array([x1_min, x2_min])
         inds = [i for i, par in enumerate(self.params) if par in kwargs]
         pars[inds] = np.array([kwargs.pop(par) for par in self.params
                                                if par in kwargs])
-                                                                                              
+                          
         logger.trace("fit_source: applying parameter scaling")
         # apply scaling to seeds and bounds
         pars = pars * self._current_par_scaling
@@ -3049,48 +3068,24 @@ class StackingMultiPointSourceLLH(MultiPointSourceLLH):
             Parameters passed to the L-BFGS-B minimiser.
 
         """
-        kwargs.setdefault("stacking", True)
+        kwargs.setdefault("stacking", True) # passed to PointSourceLLH.fit_source
         kwargs.setdefault("factr", _factr)
-        scramble = kwargs.pop("scramble", False)
-        inject = kwargs.pop("inject", None)
+        #scramble = kwargs.pop("scramble", False) # passed to MultiPointSourceLLH._select_events
+        inject = kwargs.pop("inject", None) # passed to MultiPointSourceLLH._select_events
 
         # Optional theoretical weight from the catalog
         self._w_theo = kwargs.pop('w_theo', np.ones_like(src_dec,dtype=float))
 
-        # short scan of the llh space to get the seed values
-        x1 = np.arange(5,100,step=30,dtype=float)
-        dx1 = np.mean(np.diff(x1))
-        x2 = np.array([2., 3.])
-        dx2 = np.mean(np.diff(x2))
 
         # Select events already at this point
-        self._select_events(src_ra, src_dec, src_lc, inject=inject, scramble=scramble, w_theo=self._w_theo)
-        N = 1
+        #self._select_events(src_ra, src_dec, src_lc, inject=inject, scramble=scramble, w_theo=self._w_theo)
         start = time.clock()
-
         
-        Z = np.reshape([[-self.llh(nsources=x_i, gamma=y_i)[0]
-                            for x_i in x1[::N]]
-                            for y_i in x2[::N]],
-                (len(x2[::N]), len(x1[::N])))
-
-
-        Z = np.ma.masked_array(Z) - np.amin(Z[np.isfinite(Z)])
-        Z.mask = ~np.isfinite(Z)
-
-
-        min_ind = np.unravel_index(Z.argmin(), Z.shape)
-        
-        x1_min = x1[::N][min_ind[1]]
-        x2_min = x2[::N][min_ind[0]]
-
-        
-        self.par_seeds = np.array([x1_min, x2_min])
         fmin,xmin = super(StackingMultiPointSourceLLH, self).fit_source(src_ra, src_dec, src_lc, **kwargs)
         stop = time.clock()
         mins, secs = divmod(stop-start,60)
         hours,mins = divmod(mins,60)
-        print("Minimizer only finished after {0:3d}h {1:2d}' {2:4.2f}''".format(int(hours),int(mins),secs))
+        #print("Minimizer only finished after {0:3d}h {1:2d}' {2:4.2f}''".format(int(hours),int(mins),secs))
 
         return fmin, xmin
 
