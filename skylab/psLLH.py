@@ -2113,6 +2113,9 @@ class MultiPointSourceLLH(PointSourceLLH):
         # init empty dictionary containers
         self._enum = dict()
         self._sams = dict()
+        
+        # init undefined parameter scaling
+        self._current_par_scaling = None
 
         return
 
@@ -2322,6 +2325,22 @@ class MultiPointSourceLLH(PointSourceLLH):
 
         self._enum[enum] = name
         self._sams[enum] = obj
+        
+        # Now the parameter scaling has been updated
+        # via the properties params -> par_scaling
+        # (which is generally a combination of params for the different sample LLHs)
+        if not (self._current_par_scaling is None): # have cached
+            # compare it to cached one:
+            new_par_scaling = obj._current_par_scaling
+            par_scaling_changed = False
+            if new_par_scaling.size != self._current_par_scaling.size:
+                par_scaling_changed = True
+            elif not np.all(new_par_scaling==self._current_par_scaling):
+                par_scaling_changed = True
+            if par_scaling_changed:
+                print("Parameter scaling changed while adding sample {0:2d} - {1:s}".format(enum, name))
+        self._current_par_scaling = self.par_scaling
+                
 
         return
 
@@ -2926,14 +2945,10 @@ class StackingMultiPointSourceLLH(MultiPointSourceLLH):
         if not isinstance(obj, StackingPointSourceLLH):
             raise ValueError("'{0}' is not Stacking LLH-style".format(obj))
 
-        if name in self._enum.values():
-            enum = self._enum.keys()[self._enum.values().index(name)]
-            print("Overwrite Sample {0:2d} - {1:s}".format(enum, name))
-        else:
-            enum = max(self._enum) + 1 if self._enum else 0
-
-        self._enum[enum] = name
-        self._sams[enum] = obj
+        # other operations same as MultiPointSourceLLH.
+        super(StackingMultiPointSourceLLH,self).add_sample(name, obj)
+        # (since StackingPointSourceLLH inherits from PointSourceLLH, the
+        # isinstance check in MultiPointSourceLLH.add_sample is now redundant.)
 
         return
 
@@ -3048,7 +3063,7 @@ class StackingMultiPointSourceLLH(MultiPointSourceLLH):
         x2 = np.array([2., 3.])
         dx2 = np.mean(np.diff(x2))
 
-        # Select events here already
+        # Select events already at this point
         self._select_events(src_ra, src_dec, src_lc, inject=inject, scramble=scramble, w_theo=self._w_theo)
         N = 1
         start = time.clock()
@@ -3075,7 +3090,7 @@ class StackingMultiPointSourceLLH(MultiPointSourceLLH):
         stop = time.clock()
         mins, secs = divmod(stop-start,60)
         hours,mins = divmod(mins,60)
-        #print("Minimizer only finished after {0:3d}h {1:2d}' {2:4.2f}''".format(int(hours),int(mins),secs))
+        print("Minimizer only finished after {0:3d}h {1:2d}' {2:4.2f}''".format(int(hours),int(mins),secs))
 
         return fmin, xmin
 
