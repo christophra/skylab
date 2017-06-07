@@ -1277,11 +1277,19 @@ class PointSourceLLH(object):
         kwargs.setdefault("pgtol", _pgtol)
         stacking = kwargs.pop('stacking', False)
         # Optional theoretical weight from the catalog
+        # I think popping this out makes _select_events reset it to the default
+        #self._w_theo = kwargs.pop('w_theo', np.ones_like(src_dec,dtype=float))
+        # So try with just setdefault-ing (won't overwrite existing)
+        # Also a bad idea: ends up in the minimizer which spits it back out
+        #kwargs.setdefault('w_theo', np.ones_like(src_dec,dtype=float))
+        #self._w_theo = kwargs['w_theo']
         self._w_theo = kwargs.pop('w_theo', np.ones_like(src_dec,dtype=float))
 
         logger.trace("fit_source: selecting events")
         # Set all SoB weights once for this source, if not already cached
-        self._select_events(src_ra, src_dec, src_lc, inject=inject, scramble=scramble)
+        #self._select_events(src_ra, src_dec, src_lc, inject=inject, scramble=scramble)
+        # Terrible hack (!)
+        self._select_events(src_ra, src_dec, src_lc, inject=inject, scramble=scramble, w_theo=self._w_theo)
 
         if self._N < 1:
             # No events selected
